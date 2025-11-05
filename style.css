@@ -1,0 +1,41 @@
+* {
+    padding: 0;
+    margin: 0;
+    box-sizing: border-box;
+}
+
+html, body {
+    min-width: 100vw;
+    max-width: 100vw;
+    min-height: 100vh;
+    height: 100%;
+}
+
+body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+
+    background-color: hsl(250,30%,25%);
+}
+
+input[type="file"] {
+    padding: 12px 6px;
+
+    background-color: hsl(0,0%,25%);
+    border-radius: 10px;
+}
+
+canvas {
+    width: 1280px;
+    height: 720px;
+    border: 6px solid black;
+    --border-radius: clamp(5rem, 4vw, 15rem);
+    border-radius: var(--border-radius) var(--border-radius) 0 0;
+}
+
+#fps-counter {
+    font-size: 1rem;
+    color: lime;
+}
