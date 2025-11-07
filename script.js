@@ -12,24 +12,28 @@ globalThis.audioPlayer = new VisualAudioPlayer(audioEl, {
     analyserNode: {
         minDecibels: -100,
         maxDecibels: 0,
-        // For some reason, this is the max fftSize before there is empty space on the right of the canvas
-        fftSize: 1024 / 1
+        fftSize: 1024 / 8
     },
     canvas: {
         width: canvRect.width,
         height: canvRect.width * 9 / 16,
         alpha: false,
         desynchronized: true,
-        gapPercent: 0.0,
+        subpixelRendering: true,
+        gapPercent: 0.5,
         interp: {
-            type: "cubic",
-            t: 0.25
+            type: "cosine",
+            t: 0.25,
+            adjacentPointRatio: 1/5
         }
     }
 });
+const gainNode = audioPlayer.audioContext.createGain();
+gainNode.gain.value = 2;
+// audioPlayer.setAudioNodes(gainNode);
+
 canvas.width = audioPlayer.options.canvas.width;
 canvas.height = audioPlayer.options.canvas.height;
-
 const bitmapCtx = canvas.getContext("bitmaprenderer", {
     alpha: audioPlayer.options.canvas.alpha
 });

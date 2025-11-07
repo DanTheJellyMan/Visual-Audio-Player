@@ -28,8 +28,8 @@ input[type="file"] {
 }
 
 canvas {
-    width: 1280px;
-    height: 720px;
+    height: 2160px;
+    aspect-ratio: 16/9;
     border: 6px solid black;
     --border-radius: clamp(5rem, 4vw, 15rem);
     border-radius: var(--border-radius) var(--border-radius) 0 0;

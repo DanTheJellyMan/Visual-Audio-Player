@@ -31,10 +31,12 @@ export default class VisualAudioPlayer {
             height: 600,
             alpha: false,
             desynchronized: true,
+            subpixelRendering: false,
             gapPercent: 0.25,
             interp: {
                 type: "linear",
-                t: 0.2
+                t: 0.2,
+                adjacentPointRatio: 1/3
             }
         }
     });
@@ -81,11 +83,9 @@ export default class VisualAudioPlayer {
         this.#handleOptionsChange();
 
         const res = () => {
-            // console.log("play", !mediaElement.paused);
             this.#audioContext.resume();
         }
         const sus = () => {
-            // console.log("pause", !mediaElement.paused);
             this.#audioContext.suspend();
         }
         mediaElement.addEventListener("play", res);
@@ -120,16 +120,28 @@ export default class VisualAudioPlayer {
         anal.maxDecibels = analOptions.maxDecibels;
 
         // Limit fftSizes that result in filled bar widths of < 1
+        const MIN_FFTSIZE = 2**5;
+        const MAX_FFTSIZE = 2**15;
         const { width, gapPercent } = options.canvas;
-        anal.fftSize = Math.min(Math.max(2**5, analOptions.fftSize), 2**15);
-        while (width / anal.frequencyBinCount * (1-gapPercent) < 1 && anal.fftSize > 2**5) {
-            anal.fftSize /= 2;
+        anal.fftSize = Math.min(
+            Math.max(MIN_FFTSIZE, analOptions.fftSize),
+            MAX_FFTSIZE
+        );
+        if (!options.canvas.subpixelRendering) {
+            while (width / anal.frequencyBinCount * (1-gapPercent) < 1 &&
+                anal.fftSize > MIN_FFTSIZE
+            ) {
+                anal.fftSize /= 2;
+            }
         }
         console.log(anal.fftSize, this.#analyserNode.fftSize);
         this.#oldDataArray.fill(0);
         this.#newDataArray.fill(0);
     }
 
+    get audioContext() {
+        return this.#audioContext;
+    }
     setAudioNodes(...nodes) {
         this.#sourceNode.disconnect();
         for (const node of this.#nodes) {
@@ -156,10 +168,9 @@ export default class VisualAudioPlayer {
             renderData: this.#calcRenderData()
         }
         VisualAudioPlayer.#worker.postMessage(renderMsg);
-        // console.log(performance.now() - startT);
     }
     #calcRenderData() {
-        const { width, height, gapPercent, interp } = this.#options.canvas;
+        const { width, height, subpixelRendering, gapPercent, interp } = this.#options.canvas;
         const bufferLength = this.#analyserNode.frequencyBinCount;
         const totalBarWidth = width / bufferLength;
         const filledWidth = totalBarWidth * (1 - gapPercent);
@@ -167,75 +178,56 @@ export default class VisualAudioPlayer {
 
         const interpMethod = VisualAudioPlayer.#interpMethods[interp.type];
         this.#analyserNode.getByteFrequencyData(this.#newDataArray);
-        const allDataArrayParams = []; // for testing
+        // const allDataArrayParams = []; // for testing
         const dataArray = this.#oldDataArray.map((y1, i) => {
+            // TODO: recheck that adjacentPointRatio is
+            // being used in the right order for all points
             let y0 = Math.min(
                 Math.max(
-                    y1*0.33,
-                    VisualAudioPlayer.#interpMethods.linear(
-                        this.#oldDataArray[Math.max(0, i-1)],
-                        this.#newDataArray[Math.max(0, i-1)],
-                        0.75
-                    )
+                    y1 * interp.adjacentPointRatio,
+                    VisualAudioPlayer.#interpMethods.linear({
+                        y1: this.#oldDataArray[Math.max(0, i-1)],
+                        y2: this.#newDataArray[Math.max(0, i-1)],
+                        mu: 0.75
+                    })
                 ),
-                y1*1.66
+                y1 / interp.adjacentPointRatio
             );
             const y2 = this.#newDataArray[i];
             const y3 = Math.min(
                 Math.max(
-                    y2*0.33,
-                    VisualAudioPlayer.#interpMethods.linear(
-                        this.#oldDataArray[Math.min(i+1, this.#oldDataArray.length-1)],
-                        this.#newDataArray[Math.min(i+1, this.#newDataArray.length-1)],
-                        0.25
-                    )
+                    y2 * interp.adjacentPointRatio,
+                    VisualAudioPlayer.#interpMethods.linear({
+                        y1: this.#oldDataArray[Math.min(i+1, this.#oldDataArray.length-1)],
+                        y2: this.#newDataArray[Math.min(i+1, this.#newDataArray.length-1)],
+                        mu: 0.25
+                    })
                 ),
-                y2*1.66
+                y2 / interp.adjacentPointRatio
             );
 
-            let interpParams = null;
-            switch (interp.type) {
-                case "linear":
-                case "cosine":
-                    interpParams = [y1, y2, interp.t];
-                    break;
-                default:
-                    const t = y1 === y2 || y1 === 0 || y2 === 0 ? 1 : interp.t;
-                    interpParams = [y0, y1, y2, y3, t];
-                    break;
-            }
-
-            allDataArrayParams.push([
-                [
-                    [this.#oldDataArray[i-1], this.#oldDataArray[i], this.#oldDataArray[i+1]],
-                    [this.#newDataArray[i-1], this.#newDataArray[i], this.#newDataArray[i+1]]
-                ]
-            , [y0, y1, y2, y3]]);
-            return interpMethod(...interpParams);
+            // allDataArrayParams.push([
+            //     [
+            //         [this.#oldDataArray[i-1], this.#oldDataArray[i], this.#oldDataArray[i+1]],
+            //         [this.#newDataArray[i-1], this.#newDataArray[i], this.#newDataArray[i+1]]
+            //     ]
+            // , [y0, y1, y2, y3]]);
+            return interpMethod({ y0, y1, y2, y3, mu: interp.t });
         });
-        // if (highestValue > 130) console.log(`highest value (${performance.now()}ms): ${highestValue}`);
         this.#oldDataArray.set(dataArray);
 
         const renderData = new Array(bufferLength);
-        // console.log(totalBarWidth, this.#analyserNode.frequencyBinCount);
-        const barWidth = Math.floor(filledWidth);
+        const barWidth = subpixelRendering ? filledWidth : Math.floor(filledWidth);
         for (let i=0; i<bufferLength; i++) {
             const totalHeight = dataArray[i];
             const hue = i * 360 / bufferLength;
             const fillStyle = `hsl(${hue},100%,50%)`;
-            const barX = Math.floor((i) * (barWidth + gapSize));
+            const rawBarX = i * (barWidth + gapSize);
+            const barX = subpixelRendering ? rawBarX : Math.floor(rawBarX);
             const barY = height;
-            const barHeight = Math.floor(-(totalHeight*height/255));
-            if (i-1>=0 && i+1<bufferLength && dataArray[i] > dataArray[i-1]*2 && dataArray[i] > dataArray[i+1]*2) {
-                console.log(`${performance.now()}ms - ${hue}`, `${barHeight}px`, allDataArrayParams[i]);
-            }
+            const rawBarHeight = totalHeight * height / -255;
+            const barHeight = subpixelRendering ? rawBarHeight : Math.floor(rawBarHeight);
             renderData[i] = { fillStyle, barX, barY, barWidth, barHeight };
-            // x = (i+1) * (barWidth + gapSize);
-
-            if (i === Math.floor(bufferLength*1)-1) {
-                // console.log("color: "+hue, "dB: "+totalHeight);
-                // console.log(`width: ${barWidth}, X: ${barX}`);
-            }
         }
         return renderData;
     }
@@ -287,14 +279,14 @@ export default class VisualAudioPlayer {
     }
 
     static #interpMethods = Object.freeze({
-        linear: (y1, y2, mu) => {
+        linear: ({ y1, y2, mu }) => {
             return y1 + (y2-y1) * mu;
         },
-        cosine: (y1, y2, mu) => {
+        cosine: ({ y1, y2, mu }) => {
             const mu2 = (1 - Math.cos(mu*Math.PI)) / 2;
             return y1 * (1 - mu2) + y2 * mu2;
         },
-        cubic: (y0, y1, y2, y3, mu) => {
+        cubic: ({ y0, y1, y2, y3, mu }) => {
             const mu2 = mu*mu;
             const a0 = y3 - y2 - y0 + y1;
             const a1 = y0 - y1 - a0;

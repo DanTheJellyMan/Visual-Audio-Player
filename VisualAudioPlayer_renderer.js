@@ -35,16 +35,16 @@ function handleRender(id, renderData) {
     const { ctx } = players[id];
     const canvasWidth = ctx.canvas.width;
 
+    ctx.clearRect(0,0,canvasWidth,ctx.canvas.height);
     // Note: Gradients are quite slow to draw with
     // const fillGradient = createSmoothGradient(ctx, canvasWidth, 0, 360, 20);
-    ctx.clearRect(0,0,canvasWidth,ctx.canvas.height);
     for (let { fillStyle, barX, barY, barWidth, barHeight } of renderData) {
         ctx.fillStyle = fillStyle;
         ctx.fillRect(barX, barY, barWidth, barHeight);
     }
     ctx.font = "36px open-sans";
     ctx.fillStyle = "white";
-    ctx.fillText(`${performance.now()}ms`,100,100);
+    ctx.fillText(`${performance.now()}ms`, 100, 100);
     return performance.now() - startT;
 }
 
