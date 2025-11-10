@@ -5,14 +5,42 @@ export default class VisualAudioPlayer {
         this.#worker.onmessage = (e) => {
             const { data } = e;
             const player = this.#players[data.id];
+            const resolvers = player.#resolvers;
 
-            switch (e.data.type) {
-                case "render":
-                    player.#sendRenderTime(data.renderTime);
+            switch (data.type) {
+                case "init":
+                    if (resolvers.init) {
+                        resolvers.init();
+                    }
                     break;
-                case "bitmap":
-                    if (player.#bitmapResolver) {
-                        player.#bitmapResolver(data.bitmap);
+                case "render":
+                    if (resolvers.render) {
+                       resolvers.render(data.renderTime);
+                    }
+                    break;
+                case "fg-render":
+                    if (resolvers.fgRender) {
+                        resolvers.fgRender(data.renderTime);
+                    }
+                    break;
+                case "bg-render":
+                    if (resolvers.bgRender) {
+                        resolvers.bgRender(data.renderTime);
+                    }
+                    break;
+                case "delete":
+                    if (resolvers.delete) {
+                        resolvers.delete();
+                    }
+                    break;
+                case "fg-bitmap":
+                    if (resolvers.fgBitmap) {
+                        resolvers.fgBitmap(data.bitmap);
+                    }
+                    break;
+                case "bg-bitmap":
+                    if (resolvers.bgBitmap) {
+                        resolvers.bgBitmap(data.bitmap);
                     }
                     break;
             }
@@ -31,7 +59,7 @@ export default class VisualAudioPlayer {
             height: 600,
             alpha: false,
             desynchronized: true,
-            subpixelRendering: false,
+            subpixelRendering: true,
             gapPercent: 0.25,
             interp: {
                 type: "linear",
@@ -49,8 +77,14 @@ export default class VisualAudioPlayer {
     #oldDataArray;
     #newDataArray;
 
-    #lastRenderTime = 0;
-    #bitmapResolver = null;
+    #resolvers = {
+        init: null,
+        render: null,
+        fgRender: null,
+        bgRender: null,
+        fgBitmap: null,
+        bgBitmap: null
+    }
 
     constructor(mediaElement, options = null) {
         Object.assign(this.#options, structuredClone(VisualAudioPlayer.#defaultOptions));
@@ -60,13 +94,6 @@ export default class VisualAudioPlayer {
             this.#id = crypto.randomUUID();
         } while (this.#id in VisualAudioPlayer.#players);
         VisualAudioPlayer.#players[this.#id] = this;
-        const { width, height, alpha, desynchronized } = this.#options.canvas;
-        const initMsg = {
-            type: "init",
-            id: this.#id,
-            canvasOptions: { width, height, ctxOptions: { alpha, desynchronized } }
-        };
-        VisualAudioPlayer.#worker.postMessage(initMsg);
 
         this.#sourceNode = this.#audioContext.createMediaElementSource(mediaElement);
         this.#analyserNode = this.#audioContext.createAnalyser();
@@ -134,7 +161,6 @@ export default class VisualAudioPlayer {
                 anal.fftSize /= 2;
             }
         }
-        console.log(anal.fftSize, this.#analyserNode.fftSize);
         this.#oldDataArray.fill(0);
         this.#newDataArray.fill(0);
     }
@@ -160,16 +186,80 @@ export default class VisualAudioPlayer {
         .connect(this.#audioContext.destination);
     }
 
-    draw() {
-        // const startT = performance.now();
-        const renderMsg = {
-            type: "render",
+    async init(offscreenCanvas, alwaysRender = false) {
+        this.postEmptyWorkerMessage("delete");
+        const deletePlayerPromise = this.createResolverPromise("delete");
+        const { width, height } = offscreenCanvas;
+        Object.assign(this.#options.canvas, { width, height });
+        const { alpha, desynchronized } = this.#options.canvas;
+        const initMsg = {
+            type: "init",
             id: this.#id,
-            renderData: this.#calcRenderData()
-        }
-        VisualAudioPlayer.#worker.postMessage(renderMsg);
+            offscreenCanvas,
+            ctxOptions: { alpha, desynchronized },
+            alwaysRender
+        };
+        await deletePlayerPromise;
+        VisualAudioPlayer.#worker.postMessage(initMsg, [offscreenCanvas]);
     }
-    #calcRenderData() {
+
+    fgRender(bitmap = null, stretchBitmap = false) {
+        const { fgData, calcTime } = this.#calcFgData();
+        const renderMsg = {
+            type: "fg-render",
+            id: this.#id,
+            renderData: { bitmap, stretchBitmap, array: fgData }
+        }
+        const transferableObjects = [];
+        if (bitmap) transferableObjects.push(bitmap);
+        VisualAudioPlayer.#worker.postMessage(renderMsg, transferableObjects);
+        return calcTime;
+    }
+    bgRender(bitmap, stretchBitmap = false) {
+        const renderMsg = {
+            type: "bg-render",
+            id: this.#id,
+            renderData: { bitmap, stretchBitmap }
+        }
+        VisualAudioPlayer.#worker.postMessage(renderMsg, [bitmap]);
+    }
+
+    createResolverPromise(resolverName) {
+        return new Promise((resolve, reject) => {
+            this.#resolvers[resolverName] = (resolveData) => {
+                this.#resolvers[resolverName] = null;
+                resolve(resolveData);
+            }
+        });
+    }
+    postEmptyWorkerMessage(resolverName) {
+        const HIGHEST_UPPER_LETTER_CODE = "Z".charCodeAt(0);
+        const charArr = resolverName.split("");
+        // Add hyphens
+        for (let i=0; i<charArr.length; i++) {
+            const letter = charArr[i];
+            if (letter.charCodeAt(0) > HIGHEST_UPPER_LETTER_CODE) continue;
+            charArr[i] = "-";
+            charArr.splice(i+1, 0, letter.toLowerCase());
+            
+            // Find resume index
+            let j = i+2;
+            for (; j<charArr.length; j++) {
+                if (charArr[j].charCodeAt(0) > HIGHEST_UPPER_LETTER_CODE) {
+                    break;
+                }
+            }
+            i += j - 1;
+        }
+        const type = charArr.join("").toLowerCase();
+        const id = this.#id;
+
+        const msg = { type, id };
+        VisualAudioPlayer.#worker.postMessage(msg);
+    }
+
+    #calcFgData() {
+        const startT = performance.now();
         const { width, height, subpixelRendering, gapPercent, interp } = this.#options.canvas;
         const bufferLength = this.#analyserNode.frequencyBinCount;
         const totalBarWidth = width / bufferLength;
@@ -178,7 +268,6 @@ export default class VisualAudioPlayer {
 
         const interpMethod = VisualAudioPlayer.#interpMethods[interp.type];
         this.#analyserNode.getByteFrequencyData(this.#newDataArray);
-        // const allDataArrayParams = []; // for testing
         const dataArray = this.#oldDataArray.map((y1, i) => {
             // TODO: recheck that adjacentPointRatio is
             // being used in the right order for all points
@@ -205,18 +294,11 @@ export default class VisualAudioPlayer {
                 ),
                 y2 / interp.adjacentPointRatio
             );
-
-            // allDataArrayParams.push([
-            //     [
-            //         [this.#oldDataArray[i-1], this.#oldDataArray[i], this.#oldDataArray[i+1]],
-            //         [this.#newDataArray[i-1], this.#newDataArray[i], this.#newDataArray[i+1]]
-            //     ]
-            // , [y0, y1, y2, y3]]);
             return interpMethod({ y0, y1, y2, y3, mu: interp.t });
         });
         this.#oldDataArray.set(dataArray);
 
-        const renderData = new Array(bufferLength);
+        const fgData = new Array(bufferLength);
         const barWidth = subpixelRendering ? filledWidth : Math.floor(filledWidth);
         for (let i=0; i<bufferLength; i++) {
             const totalHeight = dataArray[i];
@@ -227,30 +309,10 @@ export default class VisualAudioPlayer {
             const barY = height;
             const rawBarHeight = totalHeight * height / -255;
             const barHeight = subpixelRendering ? rawBarHeight : Math.floor(rawBarHeight);
-            renderData[i] = { fillStyle, barX, barY, barWidth, barHeight };
+            fgData[i] = { fillStyle, barX, barY, barWidth, barHeight };
         }
-        return renderData;
-    }
-
-    #sendRenderTime(ms) {
-        this.#lastRenderTime = ms;
-    }
-    get lastRenderTime() {
-        return this.#lastRenderTime;
-    }
-
-    getImageBitmap() {
-        return new Promise((resolve, reject) => {
-            this.#bitmapResolver = (resolveData) => {
-                resolve(resolveData);
-                this.#bitmapResolver = null;
-            }
-            const bitmapMsg = {
-                type: "bitmap",
-                id: this.#id
-            }
-            VisualAudioPlayer.#worker.postMessage(bitmapMsg);
-        });
+        const calcTime = performance.now() - startT;
+        return { calcTime, fgData };
     }
 
     /**

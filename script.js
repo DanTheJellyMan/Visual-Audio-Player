@@ -2,12 +2,11 @@ import VisualAudioPlayer from "./VisualAudioPlayer.js";
 
 const canvas = document.querySelector("canvas");
 const audioEl = document.querySelector("audio#music");
-const fileInput = document.querySelector("input[type='file']");
-setMediaSrcFromFile(audioEl, fileInput.files[0]);
-fileInput.oninput = () => setMediaSrcFromFile(audioEl, fileInput.files[0]);
+const mediaInput = document.querySelector("#media-input");
+setMediaSrcFromFile(audioEl, mediaInput.files[0]);
+mediaInput.oninput = () => setMediaSrcFromFile(audioEl, mediaInput.files[0]);
 const fpsCounter = document.querySelector("#fps-counter");
 
-const canvRect = canvas.getBoundingClientRect();
 globalThis.audioPlayer = new VisualAudioPlayer(audioEl, {
     analyserNode: {
         minDecibels: -100,
@@ -15,8 +14,7 @@ globalThis.audioPlayer = new VisualAudioPlayer(audioEl, {
         fftSize: 1024 / 8
     },
     canvas: {
-        width: canvRect.width,
-        height: canvRect.width * 9 / 16,
+
         alpha: false,
         desynchronized: true,
         subpixelRendering: true,
@@ -28,41 +26,57 @@ globalThis.audioPlayer = new VisualAudioPlayer(audioEl, {
         }
     }
 });
+canvas.width = 1920;
+canvas.height = 1080;
+audioPlayer.init(canvas.transferControlToOffscreen(), false);
+
+globalThis.img = new Image();
+const imgInput = document.querySelector("#image-input");
+audioPlayer.createResolverPromise("init").then(() => {
+    const handleImageInput = () => {
+        setMediaSrcFromFile(img, imgInput.files[0]);
+        if (!img.src) return;
+        img.addEventListener("load", () => {
+            window.createImageBitmap(img).then((bitmap) => {
+                audioPlayer.bgRender(bitmap, true);
+            });
+        }, { once: true });
+    }
+    handleImageInput(img, imgInput.files[0]);
+    imgInput.oninput = handleImageInput;
+});
+
 const gainNode = audioPlayer.audioContext.createGain();
 gainNode.gain.value = 2;
 // audioPlayer.setAudioNodes(gainNode);
 
-canvas.width = audioPlayer.options.canvas.width;
-canvas.height = audioPlayer.options.canvas.height;
-const bitmapCtx = canvas.getContext("bitmaprenderer", {
-    alpha: audioPlayer.options.canvas.alpha
-});
-const fpsSamples = new Array(60);
-let fpsSampleCount = 0;
+const renderTimeSamples = [];
+const sampleSize = 165 * 1;
 
+let lastTimestamp = performance.now(); // for testing
 requestAnimationFrame(draw);
-async function draw(timestamp) {
-    if (fpsSampleCount >= fpsSamples.length) {
-        const avgRenderTime = fpsSamples.reduce((prev, curr) => {
-            return prev + curr;
-        }) / fpsSampleCount;
-        const fps = Math.round(1000 / Math.max(1, avgRenderTime));
-        fpsCounter.textContent = `FPS (via render time): ${fps}`;
-        fpsSampleCount = 0;
+function draw(timestamp) {
+    if (renderTimeSamples.length > sampleSize) {
+        const sum = renderTimeSamples.reduce((prev, curr) => prev + curr);
+        console.log(`FPS: ${1000 / (sum/renderTimeSamples.length)}`);
+        console.log(`Real FPS: ${1000 / (timestamp - lastTimestamp)}`);
+        renderTimeSamples.length = 0;
     }
-    fpsSamples[fpsSampleCount++] = audioPlayer.lastRenderTime;
-
+    lastTimestamp = timestamp;
+    
+    // TODO: check issue of canvas freezing after playing and then pausing audio
     if (!audioEl.paused) {
-        audioPlayer.draw();
-        const bitmap = await audioPlayer.getImageBitmap();
-        if (!audioEl.paused) {
-            bitmapCtx.transferFromImageBitmap(bitmap);
-        }
-        bitmap.close();
+        audioPlayer.fgRender();
+        audioPlayer.createResolverPromise("fgRender").then((renderTime) => {
+            renderTimeSamples.push(renderTime);
+        });
+        audioPlayer.postEmptyWorkerMessage("render");
+        audioPlayer.createResolverPromise("render")
+        .then(() => requestAnimationFrame(draw));
+    } else {
+        requestAnimationFrame(draw);
     }
-    requestAnimationFrame(draw);
 }
-// setInterval(draw, 1000/15);
 
 function setMediaSrcFromFile(mediaElement, file) {
     if (!file || !(file instanceof File)) return;

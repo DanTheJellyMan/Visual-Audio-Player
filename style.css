@@ -28,7 +28,7 @@ input[type="file"] {
 }
 
 canvas {
-    height: 2160px;
+    height: 720px;
     aspect-ratio: 16/9;
     border: 6px solid black;
     --border-radius: clamp(5rem, 4vw, 15rem);
