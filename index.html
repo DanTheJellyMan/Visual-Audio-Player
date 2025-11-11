@@ -6,10 +6,12 @@
     <script type="module" src="./script.js"></script>
 </head>
 <body>
-    <input id="media-input" type="file" accept="video/webm, audio/mpeg, audio/opus">
-    <input id="image-input" type="file" accept="image/jpeg, image/png">
+    <input id="media-input" type="file" accept="video/*, audio/*">
+    <input id="image-input" type="file" accept="image/*">
     <audio id="music" controls></audio>
     <canvas></canvas>
     <p id="fps-counter"></p>
+    <input id="video-input" type="file" accept="video/*">
+    <video controls></video>
 </body>
 </html>

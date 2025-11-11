@@ -22,6 +22,7 @@ self.onmessage = (e) => {
         }
         case "bg-render": {
             const renderTime = handleRender(players[id].bgCtx, renderData);
+            players[id].stretchBackground = renderData.stretchBitmap || false;
             self.postMessage({ type, id, renderTime });
             if (players[id].alwaysRender) handleFinalRender(id);
             break;
@@ -50,57 +51,24 @@ function handleInit(id, offscreenCanvas, ctxOptions, alwaysRender) {
     const fgCanvas = new OffscreenCanvas(width, height);
     const bgCanvas = new OffscreenCanvas(width, height);
     const mainCtx = offscreenCanvas.getContext("2d", ctxOptions);
-    // Alpha required to see background
+    // Alpha foreground required to see background
     const fgCtx = fgCanvas.getContext("2d", { ...ctxOptions, alpha: true });
     const bgCtx = bgCanvas.getContext("bitmaprenderer", ctxOptions);
 
-    players[id] = { mainCtx, fgCtx, bgCtx, alwaysRender };
+    players[id] = { mainCtx, fgCtx, bgCtx, alwaysRender, stretchBackground: false };
 }
 
 function handleFinalRender(id) {
     const startT = performance.now();
-    const { mainCtx, fgCtx, bgCtx } = players[id];
+    const { mainCtx, fgCtx, bgCtx, stretchBackground } = players[id];
     const { width, height } = mainCtx.canvas;
+    const sizeParams = [];
+    if (stretchBackground) sizeParams.push(width, height);
     mainCtx.clearRect(0, 0, width, height);
-    mainCtx.drawImage(bgCtx.canvas, 0, 0, width, height);
-    mainCtx.drawImage(fgCtx.canvas, 0, 0, width, height);
+    mainCtx.drawImage(bgCtx.canvas, 0, 0, ...sizeParams);
+    mainCtx.drawImage(fgCtx.canvas, 0, 0);
     return performance.now() - startT;
 }
-
-// function handleFgRender(id, renderData) {
-//     const startT = performance.now();
-//     const { fgCtx } = players[id];
-//     const { bitmap, stretchBitmap, array } = renderData;
-//     const canvasWidth = fgCtx.canvas.width;
-//     const canvasHeight = fgCtx.canvas.height;
-
-//     // Note: Gradients are quite slow to draw with
-//     // const fillGradient = createSmoothGradient(fgCtx, canvasWidth, 0, 360, 20);
-//     fgCtx.clearRect(0, 0, canvasWidth, canvasHeight);
-//     for (let { fillStyle, barX, barY, barWidth, barHeight } of array) {
-//         if (bitmap === undefined || bitmap === null) {
-//             fgCtx.fillStyle = fillStyle;
-//             fgCtx.fillRect(barX, barY, barWidth, barHeight);
-//         } else {
-//             fgCtx.rect(barX, barY, barWidth, barHeight);
-//         }
-//     }
-//     if (bitmap !== undefined && bitmap !== null) {
-//         fgCtx.globalCompositeOperation = "source-in";
-//         let drawWidth = bitmap.width;
-//         let drawHeight = bitmap.height;
-//         if (stretchBitmap) {
-//             drawWidth = canvasWidth;
-//             drawHeight = canvasHeight;
-//         }
-//         fgCtx.drawImage(bitmap, 0, 0, drawWidth, drawHeight);
-//         fgCtx.globalCompositeOperation = "source-over";
-//     }
-//     fgCtx.font = "36px open-sans";
-//     fgCtx.fillStyle = "white";
-//     fgCtx.fillText(`${performance.now()}ms`, 100, 100);
-//     return performance.now() - startT;
-// }
 
 function handleRender(ctx, renderData, textData) {
     const startT = performance.now();
@@ -114,18 +82,19 @@ function handleRender(ctx, renderData, textData) {
         ctx.transferFromImageBitmap(bitmap);
     } else {
         ctx.clearRect(0, 0, canvasWidth, canvasHeight);
-        ctx.beginPath();
         if (array) {
             for (let { fillStyle, barX, barY, barWidth, barHeight } of array) {
-                if (bitmap === undefined || bitmap === null) {
+                if (fillStyle) {
                     ctx.fillStyle = fillStyle;
                     ctx.fillRect(barX, barY, barWidth, barHeight);
-                } else {
-                    ctx.rect(barX, barY, barWidth, barHeight);
                 }
             }
+            ctx.beginPath();
+            for (const { barX, barY, barWidth, barHeight } of array) {
+                ctx.rect(barX, barY, barWidth, barHeight);
+            }
         }
-        ctx.closePath();
+        
         if (bitmap !== undefined && bitmap !== null) {
             ctx.globalCompositeOperation = "source-in";
             let drawWidth = bitmap.width;
@@ -136,7 +105,9 @@ function handleRender(ctx, renderData, textData) {
             }
             ctx.drawImage(bitmap, 0, 0, drawWidth, drawHeight);
             ctx.globalCompositeOperation = "source-over";
+            bitmap.close();
         }
+        ctx.closePath();
     }
 
     if (textData) {

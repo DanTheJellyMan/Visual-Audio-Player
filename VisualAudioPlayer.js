@@ -62,7 +62,7 @@ export default class VisualAudioPlayer {
             subpixelRendering: true,
             gapPercent: 0.25,
             interp: {
-                type: "linear",
+                type: "cosine",
                 t: 0.2,
                 adjacentPointRatio: 1/3
             }
@@ -163,6 +163,10 @@ export default class VisualAudioPlayer {
         }
         this.#oldDataArray.fill(0);
         this.#newDataArray.fill(0);
+    }
+
+    get resolvers() {
+        return Object.keys(this.#resolvers);
     }
 
     get audioContext() {
@@ -269,8 +273,6 @@ export default class VisualAudioPlayer {
         const interpMethod = VisualAudioPlayer.#interpMethods[interp.type];
         this.#analyserNode.getByteFrequencyData(this.#newDataArray);
         const dataArray = this.#oldDataArray.map((y1, i) => {
-            // TODO: recheck that adjacentPointRatio is
-            // being used in the right order for all points
             let y0 = Math.min(
                 Math.max(
                     y1 * interp.adjacentPointRatio,
