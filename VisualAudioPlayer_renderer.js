@@ -76,7 +76,7 @@ function handleRender(ctx, renderData, textData) {
     const canvasWidth = ctx.canvas.width;
     const canvasHeight = ctx.canvas.height;
 
-    // Note: Gradients are quite slow to draw with
+    // NOTE: Gradients are quite slow to draw with
     // const fillGradient = createSmoothGradient(ctx, canvasWidth, 0, 360, 20);
     if (ctx.transferFromImageBitmap) {
         ctx.transferFromImageBitmap(bitmap);
@@ -84,25 +84,19 @@ function handleRender(ctx, renderData, textData) {
         ctx.clearRect(0, 0, canvasWidth, canvasHeight);
         if (array) {
             for (let { fillStyle, barX, barY, barWidth, barHeight } of array) {
-                if (fillStyle) {
-                    ctx.fillStyle = fillStyle;
-                    ctx.fillRect(barX, barY, barWidth, barHeight);
-                }
-            }
-            ctx.beginPath();
-            for (const { barX, barY, barWidth, barHeight } of array) {
-                ctx.rect(barX, barY, barWidth, barHeight);
+                ctx.fillStyle = fillStyle ? fillStyle : "white";
+                ctx.fillRect(barX, barY, barWidth, barHeight);
             }
         }
         
         if (bitmap !== undefined && bitmap !== null) {
-            ctx.globalCompositeOperation = "source-in";
             let drawWidth = bitmap.width;
             let drawHeight = bitmap.height;
             if (stretchBitmap) {
                 drawWidth = canvasWidth;
                 drawHeight = canvasHeight;
             }
+            ctx.globalCompositeOperation = "source-atop";
             ctx.drawImage(bitmap, 0, 0, drawWidth, drawHeight);
             ctx.globalCompositeOperation = "source-over";
             bitmap.close();

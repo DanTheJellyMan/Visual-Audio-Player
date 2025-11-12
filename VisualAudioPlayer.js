@@ -207,8 +207,8 @@ export default class VisualAudioPlayer {
         VisualAudioPlayer.#worker.postMessage(initMsg, [offscreenCanvas]);
     }
 
-    fgRender(bitmap = null, stretchBitmap = false) {
-        const { fgData, calcTime } = this.#calcFgData();
+    fgRender(bitmap = null, stretchBitmap = false, fill = "rgb") {
+        const { fgData, calcTime } = this.#calcFgData(fill);
         const renderMsg = {
             type: "fg-render",
             id: this.#id,
@@ -262,50 +262,51 @@ export default class VisualAudioPlayer {
         VisualAudioPlayer.#worker.postMessage(msg);
     }
 
-    #calcFgData() {
+    // NOTE: Maybe calculate some motion blur on top of the bars?
+    // Might want to calc a number, and then let the renderer handle the rest.
+    #calcFgData(fill = null) {
         const startT = performance.now();
         const { width, height, subpixelRendering, gapPercent, interp } = this.#options.canvas;
+        const interpMethod = VisualAudioPlayer.#interpMethods[interp.type];
+        this.#analyserNode.getByteFrequencyData(this.#newDataArray);
+        const dataArray = VisualAudioPlayer.interpArrays(
+            this.#oldDataArray,
+            this.#newDataArray,
+            interpMethod,
+            interp.t,
+            interp.adjacentPointRatio
+        );
+        this.#oldDataArray.set(dataArray);
+
+        const DEFAULT_FILL = "rgb";
         const bufferLength = this.#analyserNode.frequencyBinCount;
         const totalBarWidth = width / bufferLength;
         const filledWidth = totalBarWidth * (1 - gapPercent);
         const gapSize = totalBarWidth * gapPercent;
 
-        const interpMethod = VisualAudioPlayer.#interpMethods[interp.type];
-        this.#analyserNode.getByteFrequencyData(this.#newDataArray);
-        const dataArray = this.#oldDataArray.map((y1, i) => {
-            let y0 = Math.min(
-                Math.max(
-                    y1 * interp.adjacentPointRatio,
-                    VisualAudioPlayer.#interpMethods.linear({
-                        y1: this.#oldDataArray[Math.max(0, i-1)],
-                        y2: this.#newDataArray[Math.max(0, i-1)],
-                        mu: 0.75
-                    })
-                ),
-                y1 / interp.adjacentPointRatio
-            );
-            const y2 = this.#newDataArray[i];
-            const y3 = Math.min(
-                Math.max(
-                    y2 * interp.adjacentPointRatio,
-                    VisualAudioPlayer.#interpMethods.linear({
-                        y1: this.#oldDataArray[Math.min(i+1, this.#oldDataArray.length-1)],
-                        y2: this.#newDataArray[Math.min(i+1, this.#newDataArray.length-1)],
-                        mu: 0.25
-                    })
-                ),
-                y2 / interp.adjacentPointRatio
-            );
-            return interpMethod({ y0, y1, y2, y3, mu: interp.t });
-        });
-        this.#oldDataArray.set(dataArray);
-
         const fgData = new Array(bufferLength);
         const barWidth = subpixelRendering ? filledWidth : Math.floor(filledWidth);
         for (let i=0; i<bufferLength; i++) {
+            let fillStyle = "";
+            if ((fill === null || fill === undefined) ||
+                (!CSS.supports("color", fill) && fill !== "")
+            ) {
+                fill = DEFAULT_FILL;
+            }
+            switch (fill) {
+                case "":
+                    fillStyle = "";
+                    break;
+                case "rgb": {
+                    const hue = i * 360 / bufferLength;
+                    fillStyle = `hsl(${hue},100%,50%)`
+                    break;
+                }
+                default:
+                    fillStyle = fill;
+                    break;
+            }
             const totalHeight = dataArray[i];
-            const hue = i * 360 / bufferLength;
-            const fillStyle = `hsl(${hue},100%,50%)`;
             const rawBarX = i * (barWidth + gapSize);
             const barX = subpixelRendering ? rawBarX : Math.floor(rawBarX);
             const barY = height;
@@ -315,6 +316,54 @@ export default class VisualAudioPlayer {
         }
         const calcTime = performance.now() - startT;
         return { calcTime, fgData };
+    }
+
+    static interpArrays(arr1, arr2, interpMethod, t, adjacentPointRatio = 1/1) {
+        if (arr1.length !== arr2.length) {
+            throw new Error(
+                `${arr1.toString()} and ${arr2.toString()} have`+
+                `unequal lengths (${arr1.length}, ${arr2.length})`
+            );
+        }
+        const interpArr = new (arr1.constructor)(arr1.length);
+        if (arr1.constructor !== arr2.constructor) {
+            const arr1N = arr1.toString();
+            const arr2N = arr2.toString();
+            console.warn(
+                `${arr1N} and ${arr2N} have different`+
+                `constructors. Will use ${arr1N}'s (${arr1.constructor.name})`
+            );
+        }
+        const lerp = VisualAudioPlayer.#interpMethods.linear;
+
+        for (let i=0; i<arr1.length; i++) {
+            const y1 = arr1[i];
+            const y0 = Math.min(
+                Math.max(
+                    y1 * adjacentPointRatio,
+                    lerp({
+                        y1: arr1[Math.max(0, i-1)],
+                        y2: arr2[Math.max(0, i-1)],
+                        mu: 0.75
+                    })
+                ),
+                y1 / adjacentPointRatio
+            );
+            const y2 = arr2[i];
+            const y3 = Math.min(
+                Math.max(
+                    y2 * adjacentPointRatio,
+                    lerp({
+                        y1: arr1[Math.min(i+1, arr1.length-1)],
+                        y2: arr2[Math.min(i+1, arr2.length-1)],
+                        mu: 0.25
+                    })
+                ),
+                y2 / adjacentPointRatio
+            );
+            interpArr[i] = interpMethod({ y0, y1, y2, y3, mu: t });
+        }
+        return interpArr;
     }
 
     /**

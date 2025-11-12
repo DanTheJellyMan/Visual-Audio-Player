@@ -35,6 +35,7 @@ globalThis.img = new Image();
 const imgInput = document.querySelector("#image-input");
 const video = document.querySelector("video");
 const videoInput = document.querySelector("input#video-input");
+let lastBitmap = null;
 
 audioPlayer.createResolverPromise("init").then(() => {
     const handleImageInput = async () => {
@@ -57,7 +58,7 @@ audioPlayer.createResolverPromise("init").then(() => {
         if (!video.src) return;
         video.addEventListener("canplay", () => {
             const { width, height } = audioPlayer.options.canvas;
-            const newWidth = width / 4;
+            const newWidth = width / 8;
             const newHeight = newWidth * 9 / 16;
             let videoFrameAvailable = false;
             const draw = async () => {
@@ -71,7 +72,8 @@ audioPlayer.createResolverPromise("init").then(() => {
                         resizeWidth: width,
                         resizeHeight: height
                     });
-                    audioPlayer.bgRender(bitmap2, false);
+                    lastBitmap = bitmap2;
+                    // audioPlayer.bgRender(bitmap2, false);
                     requestAnimationFrame(draw);
                 } else {
                     requestAnimationFrame(draw);
@@ -99,7 +101,7 @@ const sampleSize = 165 * 2;
 
 let lastTimestamp = performance.now(); // for testing
 requestAnimationFrame(draw);
-function draw(timestamp) {
+async function draw(timestamp) {
     if (renderTimeSamples.length > sampleSize) {
         const sum = renderTimeSamples.reduce((prev, curr) => prev + curr);
         console.log(`FPS: ${1000 / (sum/renderTimeSamples.length)}`);
@@ -109,7 +111,13 @@ function draw(timestamp) {
     lastTimestamp = timestamp;
 
     if (!audioEl.paused) {
-        audioPlayer.fgRender();
+        if (lastBitmap) {
+            audioPlayer.fgRender(lastBitmap, false);
+            lastBitmap = null;
+        } else {
+            audioPlayer.fgRender(null, false);
+        }
+        
         audioPlayer.createResolverPromise("fgRender").then((renderTime) => {
             renderTimeSamples.push(renderTime);
         });
