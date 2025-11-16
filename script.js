@@ -9,18 +9,18 @@ const fpsCounter = document.querySelector("#fps-counter");
 
 globalThis.audioPlayer = new VisualAudioPlayer(audioEl, {
     analyserNode: {
-        minDecibels: -100,
-        maxDecibels: 0,
-        fftSize: 1024 / 8
+        minDecibels: -95,
+        maxDecibels: -15,
+        fftSize: 1024 / 2
     },
     canvas: {
         alpha: false,
         desynchronized: true,
         subpixelRendering: true,
-        gapPercent: 0.5,
+        gapPercent: 0.25,
         interp: {
             type: "cosine",
-            t: 0.25,
+            t: 0.2,
             adjacentPointRatio: 1/5
         }
     }
@@ -29,7 +29,7 @@ canvas.width = 1920;
 canvas.height = 1080;
 
 // alwaysRender = true; is not reliable right now until out-of-order frame issue is resolved
-audioPlayer.init(canvas.transferControlToOffscreen(), true);
+audioPlayer.init(canvas.transferControlToOffscreen(), 10, true);
 
 globalThis.img = new Image();
 const imgInput = document.querySelector("#image-input");
@@ -104,8 +104,9 @@ requestAnimationFrame(draw);
 async function draw(timestamp) {
     if (renderTimeSamples.length > sampleSize) {
         const sum = renderTimeSamples.reduce((prev, curr) => prev + curr);
-        console.log(`FPS: ${1000 / (sum/renderTimeSamples.length)}`);
-        console.log(`Real FPS: ${1000 / (timestamp - lastTimestamp)}`);
+        const sampledFps = Math.round(1000 / (sum / renderTimeSamples.length));
+        const realFps = Math.round(1000 / (timestamp - lastTimestamp));
+        fpsCounter.textContent = `FPS: ${sampledFps}, Real FPS: ${realFps}`;
         renderTimeSamples.length = 0;
     }
     lastTimestamp = timestamp;

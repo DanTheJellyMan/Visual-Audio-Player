@@ -1,11 +1,11 @@
 const players = {};
 
 self.onmessage = (e) => {
-    const { type, id, renderData, offscreenCanvas, ctxOptions, alwaysRender } = e.data;
+    const { type, id, renderData, textData, offscreenCanvas, ctxOptions, alwaysRender, alphaGradientBitmap } = e.data;
 
     switch (type) {
         case "init": {
-            handleInit(id, offscreenCanvas, ctxOptions, alwaysRender);
+            handleInit(id, offscreenCanvas, ctxOptions, alwaysRender, alphaGradientBitmap);
             self.postMessage({ type, id });
             break;
         }
@@ -15,13 +15,13 @@ self.onmessage = (e) => {
             break;
         }
         case "fg-render": {
-            const renderTime = handleRender(players[id].fgCtx, renderData);
+            const renderTime = handleRender(players[id].fgCtx, renderData, textData, players[id].alphaGradientBitmap);
             self.postMessage({ type, id, renderTime });
             if (players[id].alwaysRender) handleFinalRender(id);
             break;
         }
         case "bg-render": {
-            const renderTime = handleRender(players[id].bgCtx, renderData);
+            const renderTime = handleRender(players[id].bgCtx, renderData, textData);
             players[id].stretchBackground = renderData.stretchBitmap || false;
             self.postMessage({ type, id, renderTime });
             if (players[id].alwaysRender) handleFinalRender(id);
@@ -46,7 +46,7 @@ self.onmessage = (e) => {
     }
 }
 
-function handleInit(id, offscreenCanvas, ctxOptions, alwaysRender) {
+function handleInit(id, offscreenCanvas, ctxOptions, alwaysRender, alphaGradientBitmap) {
     const { width, height } = offscreenCanvas;
     const fgCanvas = new OffscreenCanvas(width, height);
     const bgCanvas = new OffscreenCanvas(width, height);
@@ -55,7 +55,14 @@ function handleInit(id, offscreenCanvas, ctxOptions, alwaysRender) {
     const fgCtx = fgCanvas.getContext("2d", { ...ctxOptions, alpha: true });
     const bgCtx = bgCanvas.getContext("bitmaprenderer", ctxOptions);
 
-    players[id] = { mainCtx, fgCtx, bgCtx, alwaysRender, stretchBackground: false };
+    players[id] = {
+        mainCtx,
+        fgCtx,
+        bgCtx,
+        alwaysRender,
+        stretchBackground: false,
+        alphaGradientBitmap
+    };
 }
 
 function handleFinalRender(id) {
@@ -70,7 +77,8 @@ function handleFinalRender(id) {
     return performance.now() - startT;
 }
 
-function handleRender(ctx, renderData, textData) {
+// For foreground & background
+function handleRender(ctx, renderData, textData = [], alphaGradientBitmap = null) {
     const startT = performance.now();
     const { bitmap, stretchBitmap, array } = renderData;
     const canvasWidth = ctx.canvas.width;
@@ -83,10 +91,31 @@ function handleRender(ctx, renderData, textData) {
     } else {
         ctx.clearRect(0, 0, canvasWidth, canvasHeight);
         if (array) {
-            for (let { fillStyle, barX, barY, barWidth, barHeight } of array) {
-                ctx.fillStyle = fillStyle ? fillStyle : "white";
-                ctx.fillRect(barX, barY, barWidth, barHeight);
+            for (let { fillStyle, barX, barY, barWidth, barHeight, motionBlur } of array) {
+                if (motionBlur !== 0) {
+                    ctx.fillStyle = "white";
+                    ctx.fillRect(barX, barY, barWidth, barHeight + motionBlur/2);
+                    ctx.drawImage(
+                        alphaGradientBitmap,
+                        0, alphaGradientBitmap.height,
+                        1, -alphaGradientBitmap.height,
+                        barX, barY - Math.abs(barHeight) + motionBlur/2,
+                        barWidth, -motionBlur
+                    );
+                    ctx.globalCompositeOperation = "source-atop";
+                }
+
+                fillStyle ??= "white";
+                ctx.fillStyle = fillStyle;
+                ctx.fillRect(barX, barY, barWidth, barHeight - motionBlur/2);
+                ctx.globalCompositeOperation = "source-over";
             }
+            // ctx.drawImage(alphaGradientBitmap,
+            //     0, alphaGradientBitmap.height,
+            //     1, -alphaGradientBitmap.height,
+            //     0, 1080/2,
+            //     300, -300
+            // );
         }
         
         if (bitmap !== undefined && bitmap !== null) {
@@ -104,8 +133,7 @@ function handleRender(ctx, renderData, textData) {
         ctx.closePath();
     }
 
-    if (textData) {
-        const { fillStyle, font, text, x, y, maxWidth } = textData;
+    for (const { fillStyle, font, text, x, y, maxWidth } of textData) {
         ctx.fillStyle = fillStyle;
         ctx.font = font;
         ctx.fillText(text, x, y, maxWidth);

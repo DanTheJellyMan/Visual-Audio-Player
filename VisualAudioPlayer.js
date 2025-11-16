@@ -65,7 +65,8 @@ export default class VisualAudioPlayer {
                 type: "cosine",
                 t: 0.2,
                 adjacentPointRatio: 1/3
-            }
+            },
+            motionBlurPercent: 1
         }
     });
     #options = {};
@@ -190,9 +191,11 @@ export default class VisualAudioPlayer {
         .connect(this.#audioContext.destination);
     }
 
-    async init(offscreenCanvas, alwaysRender = false) {
+    async init(offscreenCanvas, gradientHeight = 100, alwaysRender = false) {
         this.postEmptyWorkerMessage("delete");
         const deletePlayerPromise = this.createResolverPromise("delete");
+
+        const alphaGradientBitmap = VisualAudioPlayer.createAlphaGradient(gradientHeight);
         const { width, height } = offscreenCanvas;
         Object.assign(this.#options.canvas, { width, height });
         const { alpha, desynchronized } = this.#options.canvas;
@@ -201,10 +204,12 @@ export default class VisualAudioPlayer {
             id: this.#id,
             offscreenCanvas,
             ctxOptions: { alpha, desynchronized },
-            alwaysRender
+            alwaysRender,
+            alphaGradientBitmap
         };
+
         await deletePlayerPromise;
-        VisualAudioPlayer.#worker.postMessage(initMsg, [offscreenCanvas]);
+        VisualAudioPlayer.#worker.postMessage(initMsg, [offscreenCanvas, alphaGradientBitmap]);
     }
 
     fgRender(bitmap = null, stretchBitmap = false, fill = "rgb") {
@@ -266,10 +271,10 @@ export default class VisualAudioPlayer {
     // Might want to calc a number, and then let the renderer handle the rest.
     #calcFgData(fill = null) {
         const startT = performance.now();
-        const { width, height, subpixelRendering, gapPercent, interp } = this.#options.canvas;
+        const { width, height, subpixelRendering, gapPercent, interp, motionBlurPercent } = this.#options.canvas;
         const interpMethod = VisualAudioPlayer.#interpMethods[interp.type];
         this.#analyserNode.getByteFrequencyData(this.#newDataArray);
-        const dataArray = VisualAudioPlayer.interpArrays(
+        const { interpArr: dataArray, differences } = VisualAudioPlayer.interpArrays(
             this.#oldDataArray,
             this.#newDataArray,
             interpMethod,
@@ -289,7 +294,7 @@ export default class VisualAudioPlayer {
         for (let i=0; i<bufferLength; i++) {
             let fillStyle = "";
             if ((fill === null || fill === undefined) ||
-                (!CSS.supports("color", fill) && fill !== "")
+                (fill !== "" && !CSS.supports("color", fill))
             ) {
                 fill = DEFAULT_FILL;
             }
@@ -299,7 +304,7 @@ export default class VisualAudioPlayer {
                     break;
                 case "rgb": {
                     const hue = i * 360 / bufferLength;
-                    fillStyle = `hsl(${hue},100%,50%)`
+                    fillStyle = `hsl(${hue},100%,50%)`;
                     break;
                 }
                 default:
@@ -312,10 +317,27 @@ export default class VisualAudioPlayer {
             const barY = height;
             const rawBarHeight = totalHeight * height / -255;
             const barHeight = subpixelRendering ? rawBarHeight : Math.floor(rawBarHeight);
-            fgData[i] = { fillStyle, barX, barY, barWidth, barHeight };
+            const motionBlur = motionBlurPercent * differences[i];
+            fgData[i] = { fillStyle, barX, barY, barWidth, barHeight, motionBlur };
         }
         const calcTime = performance.now() - startT;
         return { calcTime, fgData };
+    }
+
+    /**
+     * Creates a 1px wide canvas with a gradient going from fully opaque to transparent. The direction is South to North (height -> 0)
+     * @param {number} height  Determines the quality, or smoothness of the gradient
+     * @param {CanvasRenderingContext2D?} ctx
+     * @returns {ImageBitmap}
+     */
+    static createAlphaGradient(height, ctx = new OffscreenCanvas(1, height).getContext("2d", { alpha: true })) {
+        const gradient = ctx.createLinearGradient(0, height, 0, 0);
+        gradient.addColorStop(0, "rgba(255, 255, 255, 1)");
+        gradient.addColorStop(1, "rgba(0, 0, 0, 0)");
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, 1, height);
+        const bitmap = ctx.canvas.transferToImageBitmap();
+        return bitmap;
     }
 
     static interpArrays(arr1, arr2, interpMethod, t, adjacentPointRatio = 1/1) {
@@ -335,6 +357,7 @@ export default class VisualAudioPlayer {
             );
         }
         const lerp = VisualAudioPlayer.#interpMethods.linear;
+        const differences = new Float32Array(arr1.length);
 
         for (let i=0; i<arr1.length; i++) {
             const y1 = arr1[i];
@@ -362,8 +385,9 @@ export default class VisualAudioPlayer {
                 y2 / adjacentPointRatio
             );
             interpArr[i] = interpMethod({ y0, y1, y2, y3, mu: t });
+            differences[i] = Math.abs(y2 - y1);
         }
-        return interpArr;
+        return { interpArr, differences };
     }
 
     /**
