@@ -1,11 +1,11 @@
 const players = {};
 
 self.onmessage = (e) => {
-    const { type, id, renderData, textData, offscreenCanvas, ctxOptions, alwaysRender, alphaGradientBitmap } = e.data;
+    const { type, id, renderData, textData, offscreenCanvas, ctxOptions, alphaGradientBitmap } = e.data;
 
     switch (type) {
         case "init": {
-            handleInit(id, offscreenCanvas, ctxOptions, alwaysRender, alphaGradientBitmap);
+            handleInit(id, offscreenCanvas, ctxOptions, alphaGradientBitmap);
             self.postMessage({ type, id });
             break;
         }
@@ -15,16 +15,23 @@ self.onmessage = (e) => {
             break;
         }
         case "fg-render": {
-            const renderTime = handleRender(players[id].fgCtx, renderData, textData, players[id].alphaGradientBitmap);
+            const renderTime = handleRender(
+                players[id].fgCtx,
+                renderData,
+                textData,
+                players[id].alphaGradientBitmap
+            );
             self.postMessage({ type, id, renderTime });
-            if (players[id].alwaysRender) handleFinalRender(id);
             break;
         }
         case "bg-render": {
-            const renderTime = handleRender(players[id].bgCtx, renderData, textData);
-            players[id].stretchBackground = renderData.stretchBitmap || false;
+            const renderTime = handleRender(
+                players[id].bgCtx,
+                renderData,
+                textData
+            );
+            players[id].stretchBackground = renderData.stretchBitmap;
             self.postMessage({ type, id, renderTime });
-            if (players[id].alwaysRender) handleFinalRender(id);
             break;
         }
         case "delete": {
@@ -46,7 +53,7 @@ self.onmessage = (e) => {
     }
 }
 
-function handleInit(id, offscreenCanvas, ctxOptions, alwaysRender, alphaGradientBitmap) {
+function handleInit(id, offscreenCanvas, ctxOptions, alphaGradientBitmap) {
     const { width, height } = offscreenCanvas;
     const fgCanvas = new OffscreenCanvas(width, height);
     const bgCanvas = new OffscreenCanvas(width, height);
@@ -59,7 +66,6 @@ function handleInit(id, offscreenCanvas, ctxOptions, alwaysRender, alphaGradient
         mainCtx,
         fgCtx,
         bgCtx,
-        alwaysRender,
         stretchBackground: false,
         alphaGradientBitmap
     };
@@ -84,14 +90,15 @@ function handleRender(ctx, renderData, textData = [], alphaGradientBitmap = null
     const canvasWidth = ctx.canvas.width;
     const canvasHeight = ctx.canvas.height;
 
-    // NOTE: Gradients are quite slow to draw with
-    // const fillGradient = createSmoothGradient(ctx, canvasWidth, 0, 360, 20);
     if (ctx.transferFromImageBitmap) {
         ctx.transferFromImageBitmap(bitmap);
+        bitmap.close();
     } else {
         ctx.clearRect(0, 0, canvasWidth, canvasHeight);
         if (array) {
             for (let { fillStyle, barX, barY, barWidth, barHeight, motionBlur } of array) {
+                // TODO: add motion blur to both top and bottom of bars, and
+                // avoid doing any transformations on the given dimensions or coordinates.
                 if (motionBlur !== 0) {
                     ctx.fillStyle = "white";
                     ctx.fillRect(barX, barY, barWidth, barHeight + motionBlur/2);
@@ -103,6 +110,8 @@ function handleRender(ctx, renderData, textData = [], alphaGradientBitmap = null
                         barWidth, -motionBlur
                     );
                     ctx.globalCompositeOperation = "source-atop";
+                } else if (barHeight === 0 || barWidth === 0) {
+                    continue;
                 }
 
                 fillStyle ??= "white";
@@ -141,9 +150,8 @@ function handleRender(ctx, renderData, textData = [], alphaGradientBitmap = null
     return performance.now() - startT;
 }
 
+// NOTE: Gradients are quite slow to draw with
 function createSmoothGradient(ctx, width, startHueDeg, endHueDeg, steps) {
-    // startHueDeg = Math.min(startHueDeg, endHueDeg);
-    // endHueDeg = Math.max(startHueDeg, endHueDeg);
     const grad = ctx.createLinearGradient(0,0,width,0);
     for (let i=0; i<=steps; i++) {
         const hue = (i * endHueDeg / steps) + startHueDeg;

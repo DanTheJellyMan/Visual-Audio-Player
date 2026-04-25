@@ -28,8 +28,7 @@ globalThis.audioPlayer = new VisualAudioPlayer(audioEl, {
 canvas.width = 1920;
 canvas.height = 1080;
 
-// alwaysRender = true; is not reliable right now until out-of-order frame issue is resolved
-audioPlayer.init(canvas.transferControlToOffscreen(), 10, true);
+audioPlayer.init(canvas.transferControlToOffscreen(), 100);
 
 globalThis.img = new Image();
 const imgInput = document.querySelector("#image-input");
@@ -97,11 +96,11 @@ gainNode.gain.value = 2;
 // audioPlayer.setAudioNodes(gainNode);
 
 const renderTimeSamples = [];
-const sampleSize = 165 * 2;
+const sampleSize = 165 * 1;
 
 let lastTimestamp = performance.now(); // for testing
 requestAnimationFrame(draw);
-async function draw(timestamp) {
+function draw(timestamp) {
     if (renderTimeSamples.length > sampleSize) {
         const sum = renderTimeSamples.reduce((prev, curr) => prev + curr);
         const sampledFps = Math.round(1000 / (sum / renderTimeSamples.length));
@@ -120,13 +119,11 @@ async function draw(timestamp) {
         }
         
         audioPlayer.createResolverPromise("fgRender").then((renderTime) => {
+            if (renderTime < 0) return;
             renderTimeSamples.push(renderTime);
         });
+
         audioPlayer.postEmptyWorkerMessage("render");
-        
-        // TODO: Find a way to halt rendering in worker thread whenever a new render begins.
-        // This is caused by starting a render for a new frame before the last render finishes.
-        // If you don't wait for resolver, outdated frames will arive, causing slowdowns in playback
         audioPlayer.createResolverPromise("render")
         .then(() => requestAnimationFrame(draw));
     } else {

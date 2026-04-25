@@ -1,3 +1,5 @@
+// TODO: Add "top", "middle", and "bottom" modes for drawing bars
+
 export default class VisualAudioPlayer {
     static #worker = new Worker("./VisualAudioPlayer_renderer.js");
     static #players = {};
@@ -61,6 +63,7 @@ export default class VisualAudioPlayer {
             desynchronized: true,
             subpixelRendering: true,
             gapPercent: 0.25,
+            align: "bottom", // top, middle, or bottom
             interp: {
                 type: "cosine",
                 t: 0.2,
@@ -161,6 +164,7 @@ export default class VisualAudioPlayer {
             ) {
                 anal.fftSize /= 2;
             }
+            analOptions.fftSize = anal.fftSize;
         }
         this.#oldDataArray.fill(0);
         this.#newDataArray.fill(0);
@@ -191,7 +195,7 @@ export default class VisualAudioPlayer {
         .connect(this.#audioContext.destination);
     }
 
-    async init(offscreenCanvas, gradientHeight = 100, alwaysRender = false) {
+    async init(offscreenCanvas, gradientHeight = 100) {
         this.postEmptyWorkerMessage("delete");
         const deletePlayerPromise = this.createResolverPromise("delete");
 
@@ -204,7 +208,6 @@ export default class VisualAudioPlayer {
             id: this.#id,
             offscreenCanvas,
             ctxOptions: { alpha, desynchronized },
-            alwaysRender,
             alphaGradientBitmap
         };
 
@@ -267,8 +270,6 @@ export default class VisualAudioPlayer {
         VisualAudioPlayer.#worker.postMessage(msg);
     }
 
-    // NOTE: Maybe calculate some motion blur on top of the bars?
-    // Might want to calc a number, and then let the renderer handle the rest.
     #calcFgData(fill = null) {
         const startT = performance.now();
         const { width, height, subpixelRendering, gapPercent, interp, motionBlurPercent } = this.#options.canvas;
@@ -290,7 +291,7 @@ export default class VisualAudioPlayer {
         const gapSize = totalBarWidth * gapPercent;
 
         const fgData = new Array(bufferLength);
-        const barWidth = subpixelRendering ? filledWidth : Math.floor(filledWidth);
+        const barWidth = subpixelRendering ? filledWidth : Math.round(filledWidth);
         for (let i=0; i<bufferLength; i++) {
             let fillStyle = "";
             if ((fill === null || fill === undefined) ||
@@ -313,10 +314,10 @@ export default class VisualAudioPlayer {
             }
             const totalHeight = dataArray[i];
             const rawBarX = i * (barWidth + gapSize);
-            const barX = subpixelRendering ? rawBarX : Math.floor(rawBarX);
+            const barX = subpixelRendering ? rawBarX : Math.round(rawBarX);
             const barY = height;
             const rawBarHeight = totalHeight * height / -255;
-            const barHeight = subpixelRendering ? rawBarHeight : Math.floor(rawBarHeight);
+            const barHeight = subpixelRendering ? rawBarHeight : Math.round(rawBarHeight);
             const motionBlur = motionBlurPercent * differences[i];
             fgData[i] = { fillStyle, barX, barY, barWidth, barHeight, motionBlur };
         }
