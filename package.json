@@ -5,7 +5,10 @@
   "main": "script.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "vite dev"
+    "prebuild": "tsc -p tsconfig.worklet-processor.json",
+    "build": "vite build",
+    "dev": "concurrently \"npm run watch:processor\" \"vite\"",
+    "watch:processor": "tsc -p tsconfig.worklet-processor.json --watch"
   },
   "repository": {
     "type": "git",
@@ -14,13 +17,15 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
+  "type": "module",
   "bugs": {
     "url": "https://github.com/DanTheJellyMan/Visual-Audio-Player/issues"
   },
   "homepage": "https://github.com/DanTheJellyMan/Visual-Audio-Player#readme",
   "devDependencies": {
     "@types/audioworklet": "^0.0.98",
+    "concurrently": "^9.2.1",
+    "typescript": "^6.0.3",
     "vite": "^8.0.10"
   }
 }

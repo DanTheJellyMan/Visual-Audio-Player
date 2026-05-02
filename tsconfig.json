@@ -1,8 +1,15 @@
 {
     "compilerOptions": {
+        "allowImportingTsExtensions": true,
+        "rewriteRelativeImportExtensions": true,
         "lib": ["ESNext", "DOM", "WebWorker"],
+        "rootDir": ".",
         "types": [
-            "@types/audioworklet"
-        ]
-    }
+            "@types/audioworklet",
+            "vite/client"
+        ],
+        "moduleResolution": "bundler"
+    },
+    "include": ["src/**/*.ts"],
+    "exclude": ["src/analyser/AdvancedAnalyserNode.ts"]
 }
