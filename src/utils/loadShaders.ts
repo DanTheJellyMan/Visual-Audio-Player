@@ -54,12 +54,12 @@ function validatePath(url: URL): Error | string {
         return new Error(pathname, { cause: invalidPathError });
     }
 
-    let i=pathname.length-1;
+    let i = pathname.length-1;
     while (i >= 0 && pathname[i] !== "/") {
         i--;
     }
     if (i < 0) {
-        return new Error(`No "shader-modules" folder found at URL: ${pathname}`, { cause: invalidPathError });
+        return new Error(`No "shader-modules" folder found at URL path: ${pathname}`, { cause: invalidPathError });
     }
 
     const dirname = pathname.substring(i+1, pathname.length);

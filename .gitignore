@@ -1,3 +1,5 @@
 node_modules/
 public/AdvancedAnalyserProcessor.js
 dist/
+VisualAudioPlayer.js
+VisualAudioPlayer_renderer.js

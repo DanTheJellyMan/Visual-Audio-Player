@@ -1,4 +1,4 @@
-import { TypedArray } from "./types.ts";
+import { TypedArray } from "./types";
 
 /**
  * Fully flattens any iterable, including Array and TypedArray

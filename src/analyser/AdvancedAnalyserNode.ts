@@ -1,16 +1,48 @@
+import { Dictionary } from "../utils/types";
+import strictObjectAssign from "../utils/strictObjectAssign";
+import * as AnalyserUtils from "../utils/analyserUtils";
+
+export type AdvancedAnalyserConfig = {
+    sab: SharedArrayBuffer
+};
+
+export type AnalyserWorkletMessagePayload = {
+    type: string,
+    data: AnalyserWorkletMessageData
+}
+type AnalyserWorkletMessageData = {
+
+}
+
 export default class AdvancedAnalyserNode extends AudioWorkletNode {
     public static readonly MAX_BUF_LEN = 2**15; // TODO: determine what this value should be
-    public readonly sab: SharedArrayBuffer;
+    
+    public config: AdvancedAnalyserConfig;
 
+    /**
+     * Not recommended calling constructor directly. Call the static async "create" method instead.
+     */
     constructor(context: AudioContext) {
-        const sab = new SharedArrayBuffer(AdvancedAnalyserNode.MAX_BUF_LEN);
+        // TODO: create a buffer layout map for sending/reading data based on config.
+        // The map will dynamically change, and should be considered for workers.
+        const config: AdvancedAnalyserConfig = {
+            sab: new SharedArrayBuffer(AdvancedAnalyserNode.MAX_BUF_LEN)
+        };
+
         super(context, "advanced-analyser-processor", {
-            processorOptions: {
-                sab
+            // Initial values
+            parameterData: {
+
             }
         });
 
-        this.sab = sab;
+        this.assignConfig();
+        this.config = config;
+    }
+
+    public assignConfig(obj: Dictionary): void {
+        strictObjectAssign(this.config, obj);
+        this.port.postMessage();
     }
 
     public static async create(context: AudioContext): Promise<AdvancedAnalyserNode> {

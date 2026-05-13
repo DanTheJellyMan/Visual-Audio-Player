@@ -1,4 +1,4 @@
-import AdvancedAnalyserNode from "./analyser/AdvancedAnalyserNode.ts";
+import AdvancedAnalyserNode from "./analyser/AdvancedAnalyserNode";
 
 // const worker = new Worker(new URL("./render-engine/worker.ts", import.meta.url));
 

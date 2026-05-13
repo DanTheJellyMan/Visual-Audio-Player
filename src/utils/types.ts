@@ -16,3 +16,5 @@ export type FixedArray<T extends unknown, N extends number> = N extends N
     : never;
 
 export type TypedArray = Int8Array | Uint8Array | Uint8ClampedArray | Int16Array | Uint16Array | Int32Array | Uint32Array | BigInt64Array | BigUint64Array | Float16Array | Float32Array | Float64Array;
+
+export type Dictionary = Record<string, Object>;
