@@ -1,23 +1,30 @@
 import { Dictionary } from "../utils/types";
 import strictObjectAssign from "../utils/strictObjectAssign";
-import * as AnalyserUtils from "../utils/analyserUtils";
+import AudioDataManager from "./AudioDataManager";
 
-export type AdvancedAnalyserConfig = {
+export type Config = Dictionary & {
+    
+};
+
+export type InitData = {
     sab: SharedArrayBuffer
 };
 
-export type AnalyserWorkletMessagePayload = {
-    type: string,
-    data: AnalyserWorkletMessageData
-}
-type AnalyserWorkletMessageData = {
+export type MessagePayload = {
+    type: MessagePayloadType,
+    data: MessagePayloadData
+};
 
-}
+type MessagePayloadType = "config-update";
+type MessagePayloadData = Config;
 
 export default class AdvancedAnalyserNode extends AudioWorkletNode {
     public static readonly MAX_BUF_LEN = 2**15; // TODO: determine what this value should be
     
-    public config: AdvancedAnalyserConfig;
+    public readonly sab: SharedArrayBuffer;
+    private config: Config = {
+
+    };
 
     /**
      * Not recommended calling constructor directly. Call the static async "create" method instead.
@@ -25,24 +32,26 @@ export default class AdvancedAnalyserNode extends AudioWorkletNode {
     constructor(context: AudioContext) {
         // TODO: create a buffer layout map for sending/reading data based on config.
         // The map will dynamically change, and should be considered for workers.
-        const config: AdvancedAnalyserConfig = {
+        const manager = new AudioDataManager();
+        const processorOptions: InitData = {
             sab: new SharedArrayBuffer(AdvancedAnalyserNode.MAX_BUF_LEN)
         };
+        super(context, "advanced-analyser-processor", { processorOptions });
 
-        super(context, "advanced-analyser-processor", {
-            // Initial values
-            parameterData: {
+        this.sab = processorOptions.sab;
 
-            }
-        });
-
-        this.assignConfig();
-        this.config = config;
+        this.assignConfig(this.config);
     }
 
-    public assignConfig(obj: Dictionary): void {
-        strictObjectAssign(this.config, obj);
-        this.port.postMessage();
+    public assignConfig(config: Config): void {
+        strictObjectAssign(this.config, config);
+
+        const msg: MessagePayload = {
+            type: "config-update",
+            data: this.config
+        };
+
+        this.port.postMessage(msg);
     }
 
     public static async create(context: AudioContext): Promise<AdvancedAnalyserNode> {

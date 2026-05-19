@@ -1,30 +1,43 @@
-import { TypedArray } from "../utils/types";
-import { AdvancedAnalyserConfig } from "./AdvancedAnalyserNode";
+import { TypedArray, Dictionary } from "../utils/types";
+import strictObjectAssign from "../utils/strictObjectAssign";
+import { InitData, Config, MessagePayload } from "./AdvancedAnalyserNode";
 
 class AdvancedAnalyserProcessor extends AudioWorkletProcessor {
+    private sab: InitData["sab"];
     private options: AudioWorkletNodeOptions;
-    private config: AdvancedAnalyserConfig | null = null;
+    private config: Config | null = null;
 
     constructor(options: AudioWorkletNodeOptions) {
         super();
         this.options = options;
         
-        this.port.addEventListener("message", this.handleNodeMessage);
+        const initData: InitData = options.processorOptions;
+        this.sab = initData.sab;
+
+        this.port.addEventListener("message", this.handleMessage);
     }
 
-    private handleMessage(e: MessageEvent<>) {
-        const {  } = e.data;
-        switch(e.)
+    private handleMessage(e: MessageEvent<MessagePayload>) {
+        const { type, data } = e.data;
+
+        switch(type) {
+            case "config-update": {
+                const dict: Dictionary = this.config ? this.config : {};
+                strictObjectAssign(dict, data);
+                this.config = dict;
+                break;
+            }
+        }
     }
 
     process(inputs: Float32Array[][], outputs: Float32Array[][], parameters: Record<string, Float32Array>): boolean {
         if (this.config !== null) {
-            const { sab } = this.config;
-            const targetArr = new Float32Array(sab);
+            const targetArr = new Float32Array(this.sab);
             
             // Handle sending input data thru array buffer
             // ...
-            targetArr.set();
+            // targetArr.set();
+            this
         }
 
         copyArrayTo(inputs, outputs);
