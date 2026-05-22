@@ -12,4 +12,4 @@ export default defineConfig({
             "cross-origin-embedder-policy": "credentialless"
         }
     }
-})
+});

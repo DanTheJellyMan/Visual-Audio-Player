@@ -32,7 +32,7 @@ export default class AdvancedAnalyserNode extends AudioWorkletNode {
     constructor(context: AudioContext) {
         // TODO: create a buffer layout map for sending/reading data based on config.
         // The map will dynamically change, and should be considered for workers.
-        const manager = new AudioDataManager();
+        // const manager = new AudioDataManager();
         const processorOptions: InitData = {
             sab: new SharedArrayBuffer(AdvancedAnalyserNode.MAX_BUF_LEN)
         };
@@ -55,7 +55,7 @@ export default class AdvancedAnalyserNode extends AudioWorkletNode {
     }
 
     public static async create(context: AudioContext): Promise<AdvancedAnalyserNode> {
-        const processorUrl = new URL("../../AdvancedAnalyserProcessor.js", import.meta.url);
+        const processorUrl = new URL("./AdvancedAnalyserProcessor", import.meta.url);
         await context.audioWorklet.addModule(processorUrl);
         
         const analyser = new AdvancedAnalyserNode(context);

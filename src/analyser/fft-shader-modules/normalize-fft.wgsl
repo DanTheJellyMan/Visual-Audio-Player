@@ -4,6 +4,7 @@
 // clamped = max(1e-6, normalized)
 // db = 20 * log10(clamped)
 
+// Logarithm base-change identity:
 // fn log10(x) -> f32 {
 //   return log2(x) / log2(10);
 // }

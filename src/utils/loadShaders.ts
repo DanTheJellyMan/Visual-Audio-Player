@@ -1,3 +1,5 @@
+/// <reference types="vite/client" />
+
 /**
  * Import all .wgsl module files within a specified "shader-modules" folder, and concatenate the text content.
  * @param url Folder/directory must end with "shader-modules"

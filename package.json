@@ -4,11 +4,9 @@
   "description": "",
   "main": "script.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "prebuild": "tsc -p tsconfig.worklet-processor.json",
+    "test": "vitest",
     "build": "vite build",
-    "dev": "concurrently \"npm run watch:processor\" \"vite\"",
-    "watch:processor": "tsc -p tsconfig.worklet-processor.json --watch"
+    "dev": "vite"
   },
   "repository": {
     "type": "git",
@@ -25,7 +23,9 @@
   "devDependencies": {
     "@types/audioworklet": "^0.0.98",
     "concurrently": "^9.2.1",
+    "cypress": "^15.15.0",
     "typescript": "^6.0.3",
-    "vite": "^8.0.10"
+    "vite": "^8.0.10",
+    "vitest": "^4.1.7"
   }
 }

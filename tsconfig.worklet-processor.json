@@ -1,7 +1,7 @@
 {
     "extends": "./tsconfig.json",
     "compilerOptions": {
-        "rootDir": "src/analyser",
+        "rootDir": ".",
         "lib": ["ESNext", "DOM"],
         "types": [
             "@types/audioworklet"
@@ -9,6 +9,5 @@
         "outDir": "public",
         "skipLibCheck": true
     },
-    "include": ["src/analyser/AdvancedAnalyserProcessor.ts"],
-    "exclude": []
+    "files": ["src/analyser/AdvancedAnalyserProcessor.ts"]
 }

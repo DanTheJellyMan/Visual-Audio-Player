@@ -11,13 +11,9 @@ export abstract class NumberWrapper {
         this.__value = this.normalizeValue(value);
     }
 
-    get value(): number | bigint {
-        return this.__value;
-    }
+    public abstract get value(): number | bigint;
 
-    set value(newValue: number | bigint) {
-        this.__value = this.normalizeValue(newValue);
-    }
+    public abstract set value(newValue: number | bigint);
 
     public abstract normalizeValue(value: number | bigint): number | bigint;
 }
@@ -28,6 +24,13 @@ abstract class IntegerWrapper extends NumberWrapper {
     public override readonly float = false;
     declare public readonly MIN: bigint;
     declare public readonly MAX: bigint;
+
+    public override get value(): bigint {
+        return this.__value;
+    };
+    public override set value(newValue: bigint) {
+        this.__value = this.normalizeValue(newValue);
+    }
 
     public override normalizeValue(value: number | bigint): bigint {
         if (typeof value === "number") {
@@ -48,6 +51,13 @@ abstract class FloatWrapper extends NumberWrapper {
     declare public readonly MAX: number;
 
     protected abstract readonly decimalDigits: number;
+
+    public override get value(): number {
+        return this.__value;
+    };
+    public override set value(newValue: number) {
+        this.__value = this.normalizeValue(newValue);
+    }
 
     public override normalizeValue(value: number): number {
         value = Math.max(this.MIN, value);
@@ -142,7 +152,8 @@ export type NumberWrapperTypes =
     typeof Uint64 |
     typeof Float16 |
     typeof Float32 |
-    typeof Float64;
+    typeof Float64
+;
 
 function roundToDecimal(num: number, decimalDigits: number): number {
     const factor = 10 ** decimalDigits;
