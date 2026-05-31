@@ -8,7 +8,7 @@ export abstract class NumberWrapper {
     public abstract readonly MAX: number | bigint;
 
     constructor(value: number | bigint) {
-        this.__value = this.normalizeValue(value);
+        this.__value = value;
     }
 
     public abstract get value(): number | bigint;
@@ -17,42 +17,64 @@ export abstract class NumberWrapper {
 
     public abstract normalizeValue(value: number | bigint): number | bigint;
 }
+// interface WrapperConstructor {
+//     new (value: number | bigint): WrapperInterface;
+// }
+// interface WrapperInterface {
+//     __value: number | bigint;
+//     readonly bytes: number;
+//     readonly signed: boolean;
+//     readonly float: boolean;
+//     readonly MIN: number | bigint;
+//     readonly MAX: number | bigint;
+
+//     get value(): number | bigint;
+//     set value(newValue: number | bigint);
+//     normalizeValue(value: number | bigint): number | bigint;
+// }
 
 abstract class IntegerWrapper extends NumberWrapper {
-    declare protected __value: bigint;
+    declare protected __value: number | bigint;
 
     public override readonly float = false;
-    declare public readonly MIN: bigint;
-    declare public readonly MAX: bigint;
 
-    public override get value(): bigint {
+    public override get value(): number | bigint {
         return this.__value;
     };
-    public override set value(newValue: bigint) {
+    public override set value(newValue: number | bigint) {
         this.__value = this.normalizeValue(newValue);
     }
 
-    public override normalizeValue(value: number | bigint): bigint {
-        if (typeof value === "number") {
-            value = BigInt(value);
-        }
-        value = value < this.MIN ? this.MIN : value;
-        value = value > this.MAX ? this.MAX : value;
-        return value;
+    public override normalizeValue(value: number | bigint): number | bigint {
+        const min = BigInt(this.MIN);
+        const max = BigInt(this.MAX);
+
+        let newValue = BigInt(value);
+        newValue = newValue < min ? min : newValue;
+        newValue = newValue > max ? max : newValue;
+
+        if (typeof value === "number") return Number(newValue);
+        return newValue;
     }
 }
 
 abstract class FloatWrapper extends NumberWrapper {
-    declare protected __value: number;
+    protected __value: number = 0;
 
     public override readonly signed = true;
     public override readonly float = true;
-    declare public readonly MIN: number;
-    declare public readonly MAX: number;
+    public readonly MIN: number = 0;
+    public readonly MAX: number = 0;
 
     protected abstract readonly decimalDigits: number;
 
+    constructor(value: number) {
+        super(value);
+        this.__value = this.normalizeValue(value);
+    }
+
     public override get value(): number {
+        // console.log("bruhhhh", this.__value)
         return this.__value;
     };
     public override set value(newValue: number) {
@@ -73,58 +95,206 @@ abstract class SignedIntegerWrapper extends IntegerWrapper {
 
 abstract class UnsignedIntegerWrapper extends IntegerWrapper {
     public override readonly signed = false;
-    public override readonly MIN = 0n;
+    declare public readonly MIN: 0 | 0n;
 }
 
 export class Int8 extends SignedIntegerWrapper {
+    declare protected __value: number;
+    
     public override readonly bytes = 1;
-    public override readonly MIN = (-2n) ** BigInt(this.bytes*8 - 1);
-    public override readonly MAX = (2n ** BigInt(this.bytes*8 - 1)) - 1n;
+    public override readonly MIN = (-2) ** (this.bytes*8 - 1);
+    public override readonly MAX = (2 ** (this.bytes*8 - 1)) - 1;
+
+    constructor(value: number) {
+        super(value);
+        this.__value = this.normalizeValue(value);
+    }
+
+    public override get value(): number {
+        return this.__value;
+    };
+    public override set value(newValue: number) {
+        this.__value = this.normalizeValue(newValue);
+    };
+
+    public override normalizeValue(value: number): number {
+        return super.normalizeValue(value) as number;
+    };
 }
 
 export class Int16 extends SignedIntegerWrapper {
+    declare protected __value: number;
+    
     public override readonly bytes = 2;
-    public override readonly MIN = (-2n) ** BigInt(this.bytes*8 - 1);
-    public override readonly MAX = (2n ** BigInt(this.bytes*8 - 1)) - 1n;
+    public override readonly MIN = (-2) ** (this.bytes*8 - 1);
+    public override readonly MAX = (2 ** (this.bytes*8 - 1)) - 1;
+
+    constructor(value: number) {
+        super(value);
+        this.__value = this.normalizeValue(value);
+    }
+
+    public override get value(): number {
+        return this.__value;
+    };
+    public override set value(newValue: number) {
+        this.__value = this.normalizeValue(newValue);
+    };
+
+    public override normalizeValue(value: number): number {
+        return super.normalizeValue(value) as number;
+    };
 }
 
 export class Int32 extends SignedIntegerWrapper {
+    declare protected __value: number;
+    
     public override readonly bytes = 4;
-    public override readonly MIN = (-2n) ** BigInt(this.bytes*8 - 1);
-    public override readonly MAX = (2n ** BigInt(this.bytes*8 - 1)) - 1n;
+    public override readonly MIN = (-2) ** (this.bytes*8 - 1);
+    public override readonly MAX = (2 ** (this.bytes*8 - 1)) - 1;
+
+    constructor(value: number) {
+        super(value);
+        this.__value = this.normalizeValue(value);
+    }
+
+    public override get value(): number {
+        return this.__value;
+    };
+    public override set value(newValue: number) {
+        this.__value = this.normalizeValue(newValue);
+    };
+
+    public override normalizeValue(value: number): number {
+        return super.normalizeValue(value) as number;
+    };
 }
 
 export class Int64 extends SignedIntegerWrapper {
+    declare protected __value: bigint;
+    
     public override readonly bytes = 8;
     public override readonly MIN = (-2n) ** BigInt(this.bytes*8 - 1);
     public override readonly MAX = (2n ** BigInt(this.bytes*8 - 1)) - 1n;
+
+    constructor(value: bigint) {
+        super(value);
+        this.__value = this.normalizeValue(value);
+    }
+
+    public override get value(): bigint {
+        return this.__value;
+    };
+    public override set value(newValue: bigint) {
+        this.__value = this.normalizeValue(newValue);
+    };
+
+    public override normalizeValue(value: bigint): bigint {
+        return super.normalizeValue(value) as bigint;
+    };
 }
 
 export class Uint8 extends UnsignedIntegerWrapper {
+    declare protected __value: number;
+    
     public override readonly bytes = 1;
-    public override readonly MAX = BigInt(2**(this.bytes*8)) - 1n;
+    public override readonly MIN = 0;
+    public override readonly MAX = (2**(this.bytes*8)) - 1;
+
+    constructor(value: number) {
+        super(value);
+        this.__value = this.normalizeValue(value);
+    }
+
+    public override get value(): number {
+        return this.__value;
+    };
+    public override set value(newValue: number) {
+        this.__value = this.normalizeValue(newValue);
+    };
+
+    public override normalizeValue(value: number): number {
+        return super.normalizeValue(value) as number;
+    };
 }
 
 export class Uint16 extends UnsignedIntegerWrapper {
+    declare protected __value: number;
+    
     public override readonly bytes = 2;
-    public override readonly MAX = BigInt(2**(this.bytes*8)) - 1n;
+    public override readonly MIN = 0;
+    public override readonly MAX = (2**(this.bytes*8)) - 1;
+
+    constructor(value: number) {
+        super(value);
+        this.__value = this.normalizeValue(value);
+    }
+
+    public override get value(): number {
+        return this.__value;
+    };
+    public override set value(newValue: number) {
+        this.__value = this.normalizeValue(newValue);
+    };
+
+    public override normalizeValue(value: number): number {
+        return super.normalizeValue(value) as number;
+    };
 }
 
 export class Uint32 extends UnsignedIntegerWrapper {
+    declare protected __value: number;
+    
     public override readonly bytes = 4;
-    public override readonly MAX = BigInt(2**(this.bytes*8)) - 1n;
+    public override readonly MIN = 0;
+    public override readonly MAX = (2**(this.bytes*8)) - 1;
+
+    constructor(value: number) {
+        super(value);
+        this.__value = this.normalizeValue(value);
+    }
+
+    public override get value(): number {
+        return this.__value;
+    };
+    public override set value(newValue: number) {
+        this.__value = this.normalizeValue(newValue);
+    };
+
+    public override normalizeValue(value: number): number {
+        return super.normalizeValue(value) as number;
+    };
 }
 
 export class Uint64 extends UnsignedIntegerWrapper {
+    declare protected __value: bigint;
+    
     public override readonly bytes = 8;
+    public override readonly MIN = 0n;
     public override readonly MAX = BigInt(2**(this.bytes*8)) - 1n;
+
+    constructor(value: bigint) {
+        super(value);
+        this.__value = this.normalizeValue(value);
+    }
+
+    public override get value(): bigint {
+        return this.__value;
+    };
+    public override set value(newValue: bigint) {
+        this.__value = this.normalizeValue(newValue);
+    };
+
+    public override normalizeValue(value: bigint): bigint {
+        return super.normalizeValue(value) as bigint;
+    };
 }
 
 export class Float16 extends FloatWrapper {
     public override readonly bytes = 2;
     public override readonly MIN = -1 * (2 - (2**-10)) * (2**15);
     public override readonly MAX = -1 * this.MIN;
-    protected override readonly decimalDigits = 4;
+    protected override readonly decimalDigits = 4;;
 }
 
 export class Float32 extends FloatWrapper {
