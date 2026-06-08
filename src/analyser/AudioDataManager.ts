@@ -1,4 +1,4 @@
-import { NumberWrapperTypes, Int8, Int16, Int32, Int64, Uint8, Uint16, Uint32, Uint64, Float16, Float32, Float64 } from "../utils/numberWrappers";
+import { NumberWrapperTypes, BigIntWrappers, NonBigIntWrappers, Int8, Int16, Int32, Int64, Uint8, Uint16, Uint32, Uint64, Float16, Float32, Float64 } from "../utils/numberWrappers";
 
 type HeaderLayoutMember = {
     byteOffset: number;
@@ -8,16 +8,15 @@ type HeaderLayout = Readonly<
     Record<keyof typeof AudioDataManager["HEADER_LAYOUT_WRAPPERS"], HeaderLayoutMember>
 >;
 
-type BigIntNumberWrappers = typeof Int64 | typeof Uint64;
-type NonBigIntNumberWrappers = Exclude<NumberWrapperTypes, BigIntNumberWrappers>;
 type IOValueForKey<K extends keyof typeof AudioDataManager["HEADER_LAYOUT_WRAPPERS"]> =
     IOValueFor<typeof AudioDataManager["HEADER_LAYOUT_WRAPPERS"][K]> 
 ;
 type IOValueFor<
     Wrapper extends typeof AudioDataManager["HEADER_LAYOUT_WRAPPERS"][keyof typeof AudioDataManager["HEADER_LAYOUT_WRAPPERS"]]
-> = Wrapper extends BigIntNumberWrappers
+> = WrapperValue<Wrapper>;
+type WrapperValue<T extends NumberWrapperTypes> = T extends BigIntWrappers
     ? bigint
-    : Wrapper extends NonBigIntNumberWrappers
+    : T extends NonBigIntWrappers
         ? number
         : never;
 
@@ -83,7 +82,7 @@ export default class AudioDataManager {
             const name = entries[i][0] as keyof typeof wrappers;
             const Wrapper = entries[i][1];
             obj[name] = { byteOffset, Wrapper };
-            byteOffset += new Wrapper(0 as never).bytes;
+            byteOffset += Wrapper.BYTES;
         }
 
         AudioDataManager.HEADER_LAYOUT = Object.freeze(obj);
@@ -91,11 +90,13 @@ export default class AudioDataManager {
     public static readonly HEADER_SIZE: number = Object.values(AudioDataManager.HEADER_LAYOUT).reduce((prev, curr, i, arr) => {
         let value = curr.byteOffset;
         if (i === arr.length-1) {
-            value += new curr.Wrapper(0 as never).bytes;
+            value += curr.Wrapper.BYTES;
         }
         return prev + value;
     }, 0);
 
+    // TODO: make this assume values are Float32, since the body will soon be converted to Float32Array
+    // TODO: make a process spacer for the start and end, respectively
     /** Numbers must be OUTSIDE OF [-1.0, 1.0] */
     public static readonly RESERVED_BODY_VALUES = Object.freeze({
         headerLayoutEnd: new Float32(2.0),
@@ -117,8 +118,10 @@ export default class AudioDataManager {
      * @param maxChannelCount Based on audio format (mono, stereo, surround)
      */
     public static estimateBufSize(sampleRate: number = 48000, inputCount: number = 2, maxChannelCount: number = 2): number {
+        // TODO: make this accomodate the header size, and the body size (Float32Array)
+        // cleanly; the body size must be divisible by 4 (bytes)
         const resbvs = AudioDataManager.RESERVED_BODY_VALUES;
-        const headerSize = AudioDataManager.HEADER_SIZE + resbvs.headerLayoutEnd.bytes;
+        const headerSize = AudioDataManager.HEADER_SIZE + (resbvs.headerLayoutEnd.constructor as typeof Float32).BYTES;
 
         const fftSize = 2 ** Number(AudioDataManager["FFT_RATIO_MAX"].value);
         const minBodySizeTarget = Math.max(fftSize, sampleRate);
@@ -134,7 +137,7 @@ export default class AudioDataManager {
      */
     public initHeader(sampleRate: number, fftRatio: number): void {
         const { headerLayoutEnd } = AudioDataManager.RESERVED_BODY_VALUES;
-        const bodyOffset = headerLayoutEnd.bytes + AudioDataManager.HEADER_SIZE;
+        const bodyOffset = (headerLayoutEnd.constructor as typeof Float32).BYTES + AudioDataManager.HEADER_SIZE;
         this.setHeader({
             headProcessOffset: BigInt(bodyOffset),
             sampleRate,
@@ -144,11 +147,7 @@ export default class AudioDataManager {
             fftRatio
         });
 
-        this.view.setFloat32(
-            AudioDataManager.HEADER_SIZE,
-            headerLayoutEnd.value,
-            true
-        );
+        this.writeViewNumber(Float32, AudioDataManager.HEADER_SIZE, headerLayoutEnd.value);
     }
 
     public setHeader<
@@ -183,77 +182,99 @@ export default class AudioDataManager {
     public writeProcess(inputs: Float32Array[][]): 0 | 1 {
         const { view } = this;
         const { inputSpacer, processSpacer } = AudioDataManager.RESERVED_BODY_VALUES;
-        const FLOAT_SIZE = new Float32(0).bytes;
+        const FLOAT_SIZE = Float32.BYTES;
+        const SHORT_SIZE = Uint16.BYTES;
         const startOffset = this.getHeader("headProcessOffset").headProcessOffset;
         const sampleFrameLength = new Uint16(inputs[0][0].length);
         let offset = this.getViewOffset(Number(startOffset));
 
-        view.setUint16(Number(offset), Number(sampleFrameLength.value), true);
-        offset = this.getViewOffset(offset + FLOAT_SIZE);
-
-        const writeFloat32 = (value: number) => {
-            // If offset not divisible by float size (4), fill with blanks until it is.
-            // This helps with offset overflows in the circular body, where
-            // trying to write a float when there are only 2 bytes left before end of buffer would cause an error.
-            const { blankFlag } = AudioDataManager["RESERVED_BODY_VALUES"];
-            const blankCount = (view.byteLength - (offset+1)) % 4;
-            for (let i=0; i<blankCount; i++) {
-                view.setFloat32(offset, blankFlag.value, true);
-                offset = this.getViewOffset(offset + blankFlag.bytes);
-            }
-
-            view.setFloat32(offset, value, true);
-            offset = this.getViewOffset(offset + FLOAT_SIZE);
-        }
+        this.writeViewNumber(Float32, offset - FLOAT_SIZE, processSpacer.value);
+        this.writeViewNumber(Uint16, offset, Number(sampleFrameLength.value));
+        offset = this.getViewValueOffset(FLOAT_SIZE, offset + SHORT_SIZE);
 
         for (const input of inputs) {
             for (const channel of input) {
                 for (const sample of channel) {
-                    writeFloat32(sample);
+                    this.writeViewNumber(Float32, offset, sample);
+                    offset = this.getViewValueOffset(FLOAT_SIZE, offset + FLOAT_SIZE);
                 }
             }
-            writeFloat32(inputSpacer.value);
+            this.writeViewNumber(Float32, offset, inputSpacer.value);
+            offset = this.getViewValueOffset(FLOAT_SIZE, offset + FLOAT_SIZE);
         }
 
-        writeFloat32(processSpacer.value);
+        this.writeViewNumber(Float32, offset, processSpacer.value);
+        offset = this.getViewValueOffset(SHORT_SIZE, offset + FLOAT_SIZE);
         this.setHeader({ headProcessOffset: BigInt(offset) });
         return 0;
     }
 
-    public readProcess(byteOffset: number): Float32Array[][] {
-        const { headerLayoutEnd, processSpacer, inputSpacer, blankFlag } = AudioDataManager["RESERVED_BODY_VALUES"];
+    public readProcess(byteOffset: number, searchDirection: -1 | 1 = -1): Float32Array[][] {
+        const { processSpacer, inputSpacer, blankFlag } = AudioDataManager["RESERVED_BODY_VALUES"];
+        const resValues = Object.values(AudioDataManager.RESERVED_BODY_VALUES).map((wrapped) => wrapped.value);
         const { view } = this;
-        const SHORT_SIZE = new Uint16(0).bytes;
-        const FLOAT_SIZE = new Float32(0).bytes;
+        const SHORT_SIZE = Uint16.BYTES;
+        const FLOAT_SIZE = Float32.BYTES;
         const inputs: Float32Array[][] = [];
-        console.log("Beginning read...");
-        byteOffset = this.findNextProcess(byteOffset);
-        console.log("next process offset:", byteOffset);
-        return inputs;
+        byteOffset = this.findNextProcess(byteOffset, searchDirection);
+        byteOffset = this.getViewValueOffset(SHORT_SIZE, byteOffset);
+        console.log(`actual read starting offset: ${byteOffset}`);
 
-        const sampleFrameLength = view.getUint16(byteOffset, true);
-        byteOffset = this.getViewOffset(byteOffset + SHORT_SIZE);
-        const viewOffsetFloat = new Float32(view.getFloat32(byteOffset, true));
+        const sampleFrameLength = this.readViewNumber(Uint16, byteOffset);
+        console.log("sample frame length: " + sampleFrameLength);
+        console.log("frame length? " + this.view.getUint16(byteOffset, true));
+        byteOffset = this.getViewValueOffset(FLOAT_SIZE,
+            this.getViewOffset(byteOffset + SHORT_SIZE)
+        );
+        const viewOffsetFloat = new Float32(this.readViewNumber(Float32, byteOffset));
 
+        let iterations = 0; // For testing
+        // Iterate through all inputs
         while(viewOffsetFloat.value !== processSpacer.value) {
             const input: Float32Array[] = [];
             
+            // Iterate through all input channels
             while(viewOffsetFloat.value !== inputSpacer.value) {
                 const channel = new Float32Array(sampleFrameLength);
+                console.log("sample frame length: " + sampleFrameLength);
+                throw new Error("u gae");
 
+                // Iterate through all channel samples
                 let i = 0;
+                // const msgs: string[] = [];
+                // const offsets: string[] = [];
                 while(i < sampleFrameLength) {
-                    const value = view.getFloat32(byteOffset, true);
-                    if (new Float32(value).value !== blankFlag.value) {
-                        channel[i] = value;
-                        i++;
+                    // offsets.push(`${byteOffset} / ${view.byteLength}`);
+                    if (byteOffset + FLOAT_SIZE < view.byteLength) {
+                        // msgs.push("giggity");
+                        viewOffsetFloat.value = this.readViewNumber(Float32, byteOffset);
+
+                        if (!resValues.includes(viewOffsetFloat.value)) {
+                            channel[i] = viewOffsetFloat.value;
+                            i++;
+                            console.log("bollocks");
+                        }
+                    } else {
+                        // msgs.push("goo");
                     }
+
                     byteOffset = this.getViewOffset(byteOffset + FLOAT_SIZE);
+
+                    if (iterations++ >= 1_000) {
+                        // console.error(`Header size: ${AudioDataManager["HEADER_SIZE"]}`);
+                        // console.error(JSON.stringify(offsets.slice(0, 20), null, 4));
+                        // console.error("Goos: "+
+                        //     JSON.stringify(msgs.filter((str) => str === "goo"), null, 4)
+                        // );
+                        throw new Error("Too much iteration");
+                    }
                 }
 
+                viewOffsetFloat.value = this.readViewNumber(Float32, byteOffset);
                 input.push(channel);
             }
 
+            viewOffsetFloat.value = this.readViewNumber(Float32, byteOffset);
             inputs.push(input);
         }
 
@@ -264,35 +285,112 @@ export default class AudioDataManager {
         byteOffset = this.findNextProcess(byteOffset);
     }
 
+    public getAllProcessOffsets(): Array<number> {
+        const offsets: Array<number> = [];
+        let nextOffset = 0;
+
+        while (offsets.length <= 1 || (offsets.length > 1 && offsets[0] !== offsets[offsets.length-1])) {
+            nextOffset = this.findNextProcess(nextOffset, 1);
+            offsets.push(nextOffset);
+            nextOffset++;
+        }
+
+        if (offsets.length > 1) offsets.shift();
+        offsets.sort((a, b) => a - b);
+        return offsets;
+    }
+
     /**
-     * If there is not a process at byteOffset, find the next process after the offset in the buffer
+     * Find the next process offset in the buffer. If initial byteOffset is on sample frame size (process block start), return that offset
      * @param byteOffset 
+     * @param searchDirection -1 = backwards | 1 = forwards
      * @returns Byte offset of next process in buffer
      */
-    public findNextProcess(byteOffset: number): number {
-        const { headerLayoutEnd, processSpacer } = AudioDataManager["RESERVED_BODY_VALUES"];
-        const FLOAT_SIZE = new Float32(0).bytes;
+    public findNextProcess(byteOffset: number, searchDirection: -1 | 1 = -1): number {
+        const { processSpacer } = AudioDataManager["RESERVED_BODY_VALUES"];
+        const FLOAT_SIZE = Float32.BYTES;
+        const SHORT_SIZE = Int16.BYTES;
+
+        // Process block start visualization:
+        // ... | 4 | 4 (spacer) | 2 (sample frame length) | 4 | ...
 
         const isProcessStartOffset = (offset: number): boolean => {
-            offset = this.getViewOffset(offset - FLOAT_SIZE);
-            const prevValue = new Float32(this.view.getFloat32(offset, true));
-            return prevValue.value === processSpacer.value || prevValue.value === headerLayoutEnd.value;
+            const spacerOffset = this.getViewValueOffset(FLOAT_SIZE, offset - FLOAT_SIZE);
+            const value = new Float32(this.readViewNumber(Float32, spacerOffset));
+            return value.value === processSpacer.value;
         }
         
         const errorValues: string[] = [];
+        // TODO: need to handle when there are no processes
         while(!isProcessStartOffset(byteOffset)) {
-            if (errorValues.length >= 1_000_000) {
-                const shortened = errorValues.slice(0, 15);
+            if (errorValues.length >= 50_000_000) {
+                const shortened = errorValues.slice(errorValues.length-15);
                 throw new Error(
-                    `Too much iteration\n`+
-                    `Process spacer & Header layout end: ${processSpacer.value} ${new Float32(55).value} | ${headerLayoutEnd.value}\n`+
+                    `Too much iteration (View byteLength: ${this.view.byteLength})\n`+
                     `${JSON.stringify(shortened, null, 4)}`
                 );
             }
             errorValues.push(`Byte offset: ${byteOffset}`);
-            byteOffset = this.getViewOffset(byteOffset + FLOAT_SIZE);
+            
+            // TODO: need to handle initial offsets that do not cleanly accomodate Shorts and Floats
+            // without just using value 1 for increment/decrement (performance concerns).
+            // This is because even if you use 2 for increment, offset wrapping in the body may lead to
+            // an awkward offset being reached, so currently value 1 solves this issue.
+            // 
+            // An idea is to make the total body size divisible by 2 or 4, but this still leads to 2 checks (instead of 4)
+            // occuring for every 4 byte value, which is still inefficient.
+            // 
+            // Another idea is to have ALL values in body be Float32, but this may undermine the
+            // purpose of even using DataView if only header will be utilizing different number sizes,
+            // making a TypedArray for body and a different data structure for the header more appealing.
+            // 
+            // Testing needed to verify if a new solution is warranted, but this is likely what should happen.
+            // The fact that blankFlags are being used is disregarding the whole point of using different number types: to save buffer space.
+            byteOffset = this.getViewOffset(byteOffset + (1 * searchDirection));
         }
 
+        return byteOffset;
+    }
+
+    private writeViewNumber<
+        T extends NumberWrapperTypes
+    >(type: T, byteOffset: number, value: WrapperValue<T>): void {
+        type ViewSetter = (byteOffset: number, value: WrapperValue<T>, littleEndian: boolean) => void;
+        const { view } = this;
+        const name = `set${AudioDataManager.getViewMethodName(type)}` as keyof typeof view;
+        const method = (view[name] as ViewSetter).bind(view);
+
+        byteOffset = this.getViewValueOffset(type.BYTES, byteOffset);
+        method(byteOffset, value, true);
+    }
+
+    private readViewNumber<
+        T extends NumberWrapperTypes
+    >(type: T, byteOffset: number): WrapperValue<T> {
+        type ViewGetter = (byteOffset: number, littleEndian: boolean) => WrapperValue<T>;
+        const { view } = this;
+        const name = `get${AudioDataManager.getViewMethodName(type)}` as keyof typeof view;
+        const method = (view[name] as ViewGetter).bind(view);
+        
+        byteOffset = this.getViewValueOffset(type.BYTES, byteOffset);
+        const value = method(byteOffset, true);
+
+        return value;
+    }
+
+    /**
+     * 
+     * @param size Expected byte size of the value at the given byte offset
+     * @param byteOffset 
+     * @returns 
+     */
+    private getViewValueOffset(size: number, byteOffset: number): number {
+        const { view } = this;
+        byteOffset = this.getViewOffset(byteOffset);
+        const blankCount = byteOffset + size >= view.byteLength
+            ? (view.byteLength - byteOffset) % size
+            : 0;
+        byteOffset = this.getViewOffset(blankCount + byteOffset);
         return byteOffset;
     }
 
@@ -303,36 +401,38 @@ export default class AudioDataManager {
      */
     private getViewOffset(byteOffset: number): number {
         const { headerLayoutEnd } = AudioDataManager["RESERVED_BODY_VALUES"];
-        const bodyOffset = AudioDataManager["HEADER_SIZE"] + headerLayoutEnd.bytes;
+        const bodyOffset = AudioDataManager["HEADER_SIZE"] + (headerLayoutEnd.constructor as typeof Float32).BYTES;
         const viewSize = this.view.byteLength;
         const bodySize = viewSize - bodyOffset;
         byteOffset -= bodyOffset;
-        return (byteOffset % bodySize) + bodyOffset;
+
+        // Negative byte offsets wrap back to the end of the buffer. Positives remain at their value
+        const wrapped = ((byteOffset % bodySize) + bodySize) % bodySize;
+        return wrapped + bodyOffset;
     }
 
     /**
      * Returns the number format name of a DataView method, AFTER "set" or "get" (e.g., "BigUint64")
      */
-    private static getViewMethodName({ Wrapper }: HeaderLayoutMember): string {
-        const wrappedValue = new Wrapper(0 as never);
+    private static getViewMethodName(Wrapper: NumberWrapperTypes): string {
         let methodName = "";
 
-        if (wrappedValue.float) {
+        if (Wrapper.FLOAT) {
             methodName += "Float";
         } else {
-            if (wrappedValue.bytes * 8 >= 64) {
+            if (Wrapper.BYTES * 8 >= 64) {
                 methodName += "Big";
             }
 
             let bigSuffix = ""; // Letters after "Big"
-            if (!wrappedValue.signed) {
+            if (Wrapper.MIN === 0) {
                 bigSuffix += "u";
             }
             bigSuffix += "int";
             methodName += bigSuffix.substring(0, 1).toUpperCase() + bigSuffix.substring(1, bigSuffix.length);
         }
 
-        methodName += `${wrappedValue.bytes * 8}`;
+        methodName += `${Wrapper.BYTES * 8}`;
         return methodName;
     }
 
@@ -362,8 +462,8 @@ export default class AudioDataManager {
         type DataViewGetter = (byteOffset: number, littleEndian: true) => IOValueForKey<K>;
 
         const { byteOffset, Wrapper } = AudioDataManager.HEADER_LAYOUT[key];
-        const wrapped = new Wrapper(0 as never);
-        const methodName = `${action}${AudioDataManager.getViewMethodName(AudioDataManager.HEADER_LAYOUT[key])}` as keyof typeof this.view;
+        const wrapped = new Wrapper(0);
+        const methodName = `${action}${AudioDataManager.getViewMethodName(AudioDataManager.HEADER_LAYOUT[key].Wrapper)}` as keyof typeof this.view;
         let method = (this.view[methodName] as DataViewSetter | DataViewGetter).bind(this.view);
 
         const methodNameStr = String(methodName);
@@ -371,14 +471,14 @@ export default class AudioDataManager {
             method = method as DataViewSetter;
             wrapped.value = value;
 
-            if (wrapped.bytes < 8) {
+            if (Wrapper.BYTES < 8) {
                 return method(byteOffset, Number(wrapped.value) as IOValueForKey<K>, true);
             } else {
                 return method(byteOffset, wrapped.value as IOValueForKey<K>, true);
             }
         } else if (methodNameStr.startsWith("get") && value === undefined) {
             method = method as DataViewGetter;
-            if (wrapped.bytes < 8) {
+            if (Wrapper.BYTES < 8) {
                 return Number(method(byteOffset, true)) as IOValueForKey<K>;
             } else {
                 return method(byteOffset, true);
