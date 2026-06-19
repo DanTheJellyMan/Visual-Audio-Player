@@ -15,14 +15,14 @@ export default defineConfig({
         }
     },
     test: {
-        bail: 10,
-        clearMocks: true,
-        coverage: {
-            clean: true,
-            cleanOnRerun: true
-        },
-        mockReset: true,
+        // bail: 10,
+        // clearMocks: true,
+        // coverage: {
+        //     clean: true,
+        //     cleanOnRerun: true
+        // },
+        // mockReset: true,
         pool: "vmThreads",
-        vmMemoryLimit: "10MB"
+        vmMemoryLimit: "2GB"
     }
 });

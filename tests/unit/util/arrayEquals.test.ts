@@ -10,6 +10,8 @@ const MAX_ARR_VALUE = Number.MAX_SAFE_INTEGER;
 const MIN_ARR_DEPTH = 1;
 const MAX_ARR_DEPTH = 10;
 
+// TODO: find out if floating-point arrays can work with this function, or if the values must first be clamped to work properly (e.g., using Float number wrapper)
+
 const testArrays: TestFunction = function(context) {
     for (let i=0; i<ARRAY_TEST_COUNT; i++) {
         const randomValues = Boolean(randInt(0, 1));

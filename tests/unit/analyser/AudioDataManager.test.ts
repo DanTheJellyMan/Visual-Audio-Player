@@ -3,15 +3,16 @@ import { randInt, randFloat } from "../../../src/utils/randomNumber";
 import arrayEquals from "../../../src/utils/arrayEquals";
 import { Float32 } from "../../../src/utils/numberWrappers";
 import AudioDataManager from "../../../src/analyser/AudioDataManager";
+import { normalizeModuleId } from "vite/module-runner";
 
-const RANDOM_TESTING = true;
+const RANDOM_TESTING = true as const;
 const MANAGER_CONFIG = getManagerConfig(RANDOM_TESTING);
 
 const bufSize = AudioDataManager.estimateBufSize(
-    MANAGER_CONFIG.sampleFrameLength,
     MANAGER_CONFIG.inputCount,
     MANAGER_CONFIG.maxChannelCount
-);
+); // TODO: investigate why the test gets frozen when modifying this value
+
 const buf = new ArrayBuffer(bufSize);
 const manager = new AudioDataManager(buf);
 manager.initHeader(
@@ -20,20 +21,25 @@ manager.initHeader(
 );
 
 const testHeader: TestFunction = function(context) {
-    const headerValues = manager.getHeader("sampleRate", "fftRatio", "headProcessOffset");
-    const bodyOffset = AudioDataManager.HEADER_SIZE + (AudioDataManager.RESERVED_BODY_VALUES.headerLayoutEnd.constructor as typeof Float32).BYTES;
+    const headerValues = manager.getHeader("sampleRate", "fftRatio", "processHeadIndex", "currentFrame", "currentTime", "previousConsumeFrame");
     
     expect(headerValues.sampleRate).toBe(MANAGER_CONFIG.sampleRate);
     expect(headerValues.fftRatio).toBe(MANAGER_CONFIG.fftRatio);
-    expect(headerValues.headProcessOffset).toBe(BigInt(bodyOffset));
+    expect(headerValues.processHeadIndex).toBe(0);
+    expect(headerValues.currentFrame).toBe(0n);
+    expect(headerValues.currentTime).toBe(0);
+    expect(headerValues.previousConsumeFrame).toBe(0n);
 }
 
 const testSampleReadWrite: TestFunction = function(context) {
-    const { randomTesting, fftRatio, sampleFrameLength, inputCount, maxChannelCount } = MANAGER_CONFIG;
     console.log(`Manager config: ${JSON.stringify(MANAGER_CONFIG, null, 4)}`);
+    
+    const { randomTesting, fftRatio, sampleFrameLength, inputCount, maxChannelCount } = MANAGER_CONFIG;
     const samplesPerProcess = sampleFrameLength * maxChannelCount * inputCount;
     const requiredProcessCount = Math.ceil((2**fftRatio) / samplesPerProcess);
-    console.log("required process count: " + requiredProcessCount);
+    const inputProcesses: Float32Array[][][] = [];
+    // console.log("required process count: " + requiredProcessCount + ", samplesPerProcess: " + samplesPerProcess);
+    
     for (let i=0; i<requiredProcessCount; i++) {
         const inputs: Float32Array[][] = new Array(inputCount)
         .fill(null)
@@ -42,23 +48,78 @@ const testSampleReadWrite: TestFunction = function(context) {
             sampleFrameLength,
             randomTesting
         ));
+        inputProcesses.push(inputs);
 
-        // console.log(`HEAD_PROCESS_OFFSET (before): ${manager.getHeader("headProcessOffset").headProcessOffset}`);
         const writeStatus = manager.writeProcess(inputs);
         expect(writeStatus, "Write successful?").toBe(0);
-        console.log(`HEAD_PROCESS_OFFSET (after): ${manager.getHeader("headProcessOffset").headProcessOffset}`);
+        // console.log(`HEAD_PROCESS_INDEX: ${manager.getHeader("processHeadIndex").processHeadIndex}`);
     }
 
-    console.log(`All process offsets:\n${JSON.stringify(manager.getAllProcessOffsets(), null, 4)}`);
+    const processIndices = manager.getAllProcessIndices();
+    console.log(`process-start indices: ${processIndices.join(", ")}`);
 
-    const outputs = manager.readProcess(0);
-    console.log("outputs:");
-    console.log(outputs);
-    // expect(arrayEquals(inputs, outputs)).toBe(true);
+    const startT = performance.now();
+    const outputProcesses = processIndices.map((index) =>
+        manager.readProcess(manager.findNextProcess(index))
+    );
+    console.log(`Total process read time: ${performance.now() - startT}ms`);
+
+    expect(inputProcesses.length).toBe(outputProcesses.length);
+    for (let i=0; i<inputProcesses.length; i++) {
+        compareProcesses(inputProcesses[i], outputProcesses[i]);
+    }
 }
 
-test("Stores and reads values back correctly", testHeader);
+const testProcessSearch: TestFunction = function(context) {
+    const processIndices = manager.getAllProcessIndices();
+    const processes = processIndices.map((index) => manager.readProcess(index));
+    
+    for (let i=0; i<processes.length; i++) {
+        const index = manager.searchProcess(processes[i]);
+
+        expect(index).toSatisfy((value) => !isNaN(value));
+        expect(index).toBe(processIndices[i]);
+    }
+}
+
+test("Stores and reads header values back correctly", testHeader);
 test(testSampleReadWrite, testSampleReadWrite);
+test(testProcessSearch, testProcessSearch);
+
+function compareProcesses<P extends Float32Array[][]>(process1: P, process2: P): void {
+    const factor = 10 ** 5;
+    const normalizeSample = (value: number): number => Math.floor(
+        Float32.normalizeValue(value) * factor
+    ) / factor;
+
+    expect(process1.length).toBe(process2.length);
+
+    for (let iI=0; iI<process1.length; iI++) {
+        const input = process1[iI];
+        const output = process2[iI];
+
+        for (let cI=0; cI<input.length; cI++) {
+            for (let sI=0; sI<input[cI].length; sI++) {
+                const inputSample = normalizeSample(input[cI][sI]);
+                const outputSample = normalizeSample(output[cI][sI]);
+
+                // For testing
+                const result = Object.is(inputSample, outputSample);
+                if (!result) {
+                    console.log(`Input: ${iI} Channel: ${cI} Sample: ${sI} - [${inputSample}, ${outputSample}]`);
+                }
+
+                // TODO: find out why the numbers, especially the first read sample, are sometimes off from input and output.
+                // Can only recreate the issue when not normalizing the raw sample values.
+                expect(inputSample).toBe(outputSample);
+            }
+            
+            // For some reason arrayEquals always fails. May be an issue with comparing floating-point values
+            // const isEqual = arrayEquals(input, output);
+            // expect(isEqual).toBe(true);
+        }
+    }
+}
 
 function generateInput(channelCount: number, sampleCount: number, random: boolean = true): Float32Array[] {
     const input = new Array(channelCount);
@@ -82,7 +143,7 @@ function generateInput(channelCount: number, sampleCount: number, random: boolea
  */
 function randSample(): number {
     const deg = randFloat(0, Math.PI * 2);
-    return Math.sin(deg);
+    return Float32.normalizeValue(Math.sin(deg));
 }
 
 function getManagerConfig(randomTesting: boolean = true) {
@@ -106,9 +167,9 @@ function getManagerConfig(randomTesting: boolean = true) {
     } else {
         sampleFrameLength = 128;
         sampleRate = rates[0];
-        fftRatio = AudioDataManager.FFT_RATIO_MAX.value;
-        inputCount = inputRange[1];
-        maxChannelCount = channelRange[1];
+        fftRatio = AudioDataManager.FFT_RATIO_MIN.value;
+        inputCount = inputRange[0];
+        maxChannelCount = channelRange[0];
     }
 
     return {

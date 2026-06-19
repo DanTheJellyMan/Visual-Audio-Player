@@ -8,7 +8,9 @@ export default function arrayEquals<T extends Object>(arr1: ArrayLike<T>, arr2: 
         );
     }
 
-    if (arr1.length !== arr2.length) return false;
+    if (arr1.length !== arr2.length) {
+        return false;
+    }
 
     for (let i=0; i<arr1.length; i++) {
         const it1 = arr1[i];
@@ -19,6 +21,7 @@ export default function arrayEquals<T extends Object>(arr1: ArrayLike<T>, arr2: 
             type EqualsMethod = (it: T) => boolean;
 
             if (!(it1 as T & { equals: EqualsMethod }).equals(it2)) {
+                console.error("r");
                 return false;
             }
         }
@@ -26,6 +29,7 @@ export default function arrayEquals<T extends Object>(arr1: ArrayLike<T>, arr2: 
         if (it1.constructor === constructor && it2.constructor === constructor) {
             type ItemArray = ArrayLike<Object>;
             if (!arrayEquals(it1 as unknown as ItemArray, it2 as unknown as ItemArray)) {
+                console.error("u");
                 return false;
             }
         }

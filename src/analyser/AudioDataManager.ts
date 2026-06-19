@@ -20,14 +20,17 @@ type WrapperValue<T extends NumberWrapperTypes> = T extends BigIntWrappers
         ? number
         : never;
 
-type ProcessInfo = {
-    byteOffset: Uint64,
-    sampleFrameLength: Uint16,
-    inputChannelCounts: Uint8[]
+export type Process = Float32Array[][];
+
+export type ProcessInfo = {
+    index: InstanceType<typeof AudioDataManager["HEADER_LAYOUT_WRAPPERS"]["processHeadIndex"]>,
+    sampleFrameLength: Float32,
+    inputs: {
+        channelCount: Uint8
+    }[]
 };
 
 // NOTE: In the future, the sample-frame sizes of data blocks may change over time, according to MDN
-
 /**
  * Handles reads and writes to a buffer containing raw audio data.
  * 
@@ -35,23 +38,17 @@ type ProcessInfo = {
  * 
  * The body comes after HeaderLayout, where process blocks contain all audio data (samples of channels per input) preceeded by the sample count.
  * 
- * The body is treated as a circular buffer. The consumer (another thing that will read the audio data) should continuously read new process data blocks until it has enough samples. Missing reading some process blocks is fine.
- * 
- * Total buffer size is arbitrarily set, but should be large enough for around 1x the sample rate, so that there won't be overwrites of data the consumer is reading.
- * 
- * Buffer layout:
- * 
- * | HeaderLayout (header-layout-end spacer) --PROCESS BLOCK-- (spacer) ... (spacer) |
+ * The body is a circular buffer. The consumer (another thing that will read the audio data) should continuously read new process data blocks until it has enough samples. Missing reading some process blocks should be fine for simple visualization.
  * 
  * Process block layout:
  * 
- * | Uint16 sample-frame length | --Input-- (spacer) ... (spacer) |
+ * (process-spacer-start) | sample frame length | --Input-- (spacer) ... (spacer) | (process-spacer-end)
  */
 export default class AudioDataManager {
     public static readonly HEADER_LAYOUT_WRAPPERS = Object.freeze({
-        /** Absolute byteOffset within the buffer */
-        headProcessOffset: Uint64,
-        /** Used to determine the size of the body */
+        /** Index DIRECTLY AFTER the latest process-block's "processSpacerEnd" flag */
+        processHeadIndex: Uint32,
+        /** Sample rate from the AudioContext */
         sampleRate: Float32,
         /** Ever-increasing context time of the audio block being processed */
         currentTime: Float64,
@@ -71,13 +68,14 @@ export default class AudioDataManager {
     public static readonly FFT_RATIO_MIN = new AudioDataManager["HEADER_LAYOUT_WRAPPERS"]["fftRatio"](5);
     public static readonly FFT_RATIO_MAX = new AudioDataManager["HEADER_LAYOUT_WRAPPERS"]["fftRatio"](15);
 
+    public static HEADER_SIZE: number;
     public static HEADER_LAYOUT: Readonly<HeaderLayout>;
     static {
         const wrappers = AudioDataManager.HEADER_LAYOUT_WRAPPERS;
         const obj = {} as Record<keyof typeof wrappers, HeaderLayoutMember>;
         let byteOffset = 0;
 
-        const entries = Object.entries(wrappers) as [keyof typeof wrappers, typeof wrappers[keyof typeof wrappers]][];
+        const entries = Object.entries(wrappers);
         for (let i=0; i<entries.length; i++) {
             const name = entries[i][0] as keyof typeof wrappers;
             const Wrapper = entries[i][1];
@@ -86,68 +84,70 @@ export default class AudioDataManager {
         }
 
         AudioDataManager.HEADER_LAYOUT = Object.freeze(obj);
+        AudioDataManager.HEADER_SIZE = byteOffset;
     }
-    public static readonly HEADER_SIZE: number = Object.values(AudioDataManager.HEADER_LAYOUT).reduce((prev, curr, i, arr) => {
-        let value = curr.byteOffset;
-        if (i === arr.length-1) {
-            value += curr.Wrapper.BYTES;
+
+    public static readonly RESERVED_BODY_VALUES = AudioDataManager.createRSBVEnum("processSpacerStart", "processSpacerEnd", "inputSpacer");
+
+    /**
+     * Creates enum-like object in the range of [2.0, Infinity). The last inputted value will be the greatest
+     * @param values 
+     * @returns 
+     */
+    private static createRSBVEnum<T extends string[]>(...values: T): Readonly<Record<T[number], number>> {
+        const customEnum = {} as Record<T[number], number>;
+        let nextValue = new Float32(2.0);
+        for (const name of values) {
+            customEnum[name as T[number]] = nextValue.value;
+            nextValue.value += 1.0;
         }
-        return prev + value;
-    }, 0);
+        return Object.freeze(customEnum);
+    }
 
-    // TODO: make this assume values are Float32, since the body will soon be converted to Float32Array
-    // TODO: make a process spacer for the start and end, respectively
-    /** Numbers must be OUTSIDE OF [-1.0, 1.0] */
-    public static readonly RESERVED_BODY_VALUES = Object.freeze({
-        headerLayoutEnd: new Float32(2.0),
-        inputSpacer: new Float32(3.0),
-        processSpacer: new Float32(4.0),
-        blankFlag: new Float32(5.0)
-    });
-
+    /** Accesses Header data */
     private view: DataView;
+    /** Accesses body data */
+    private arr: Float32Array<ArrayBufferLike>;
 
     constructor(buf: ArrayBufferLike) {
-        this.view = new DataView(buf);
+        const hdrSize = AudioDataManager.HEADER_SIZE;
+        this.view = new DataView(buf, 0, hdrSize);
+
+        const FLOAT_SIZE = Float32Array.BYTES_PER_ELEMENT;
+        const arrOffset = hdrSize + FLOAT_SIZE - (hdrSize % FLOAT_SIZE);
+        const arrLength = Math.floor((buf.byteLength - arrOffset) / FLOAT_SIZE);
+        this.arr = new Float32Array(buf, arrOffset, arrLength);
     }
 
     /**
-     * Estimate a good size for the buffer in bytes
-     * @param sampleRate Samples processed per second
+     * Estimate a generous size for the buffer in bytes
      * @param inputCount
-     * @param maxChannelCount Based on audio format (mono, stereo, surround)
+     * @param maxChannelCount Based on audio format (mono, stereo, surround, etc.)
      */
-    public static estimateBufSize(sampleRate: number = 48000, inputCount: number = 2, maxChannelCount: number = 2): number {
-        // TODO: make this accomodate the header size, and the body size (Float32Array)
-        // cleanly; the body size must be divisible by 4 (bytes)
-        const resbvs = AudioDataManager.RESERVED_BODY_VALUES;
-        const headerSize = AudioDataManager.HEADER_SIZE + (resbvs.headerLayoutEnd.constructor as typeof Float32).BYTES;
+    public static estimateBufSize(inputCount: number = 2, maxChannelCount: number = 2): number {
+        const FLOAT_SIZE = Float32.BYTES;
+        const headerSize = AudioDataManager.HEADER_SIZE;
 
         const fftSize = 2 ** Number(AudioDataManager["FFT_RATIO_MAX"].value);
-        const minBodySizeTarget = Math.max(fftSize, sampleRate);
+        const maxSampleFrameLength = 512;
+        const processLength = inputCount * maxChannelCount * maxSampleFrameLength;
+        const minBodySize = Math.ceil(fftSize / processLength) * processLength * FLOAT_SIZE;
 
-        const sampleFrameLength = 512;
-        const maxProcessSampleCount = inputCount * maxChannelCount * sampleFrameLength;
-
-        return (headerSize + minBodySizeTarget + (maxProcessSampleCount * 10)) * 5;
+        return headerSize + (minBodySize * 5);
     }
 
     /**
-     * Convenience method for setting all necessary values for the header and the header spacer
+     * Convenience method for setting all necessary values for the header
      */
     public initHeader(sampleRate: number, fftRatio: number): void {
-        const { headerLayoutEnd } = AudioDataManager.RESERVED_BODY_VALUES;
-        const bodyOffset = (headerLayoutEnd.constructor as typeof Float32).BYTES + AudioDataManager.HEADER_SIZE;
         this.setHeader({
-            headProcessOffset: BigInt(bodyOffset),
+            processHeadIndex: 0,
             sampleRate,
             currentTime: 0.0,
             currentFrame: 0n,
             previousConsumeFrame: 0n,
             fftRatio
         });
-
-        this.writeViewNumber(Float32, AudioDataManager.HEADER_SIZE, headerLayoutEnd.value);
     }
 
     public setHeader<
@@ -175,240 +175,238 @@ export default class AudioDataManager {
     }
 
     /**
-     * 
      * @param inputs 
-     * @returns If there is not enough space in buffer to write, returns 1, otherwise 0 for success.
+     * @returns If there is not enough space in buffer to write, returns 1, otherwise 0 for success
      */
-    public writeProcess(inputs: Float32Array[][]): 0 | 1 {
-        const { view } = this;
-        const { inputSpacer, processSpacer } = AudioDataManager.RESERVED_BODY_VALUES;
-        const FLOAT_SIZE = Float32.BYTES;
-        const SHORT_SIZE = Uint16.BYTES;
-        const startOffset = this.getHeader("headProcessOffset").headProcessOffset;
-        const sampleFrameLength = new Uint16(inputs[0][0].length);
-        let offset = this.getViewOffset(Number(startOffset));
-
-        this.writeViewNumber(Float32, offset - FLOAT_SIZE, processSpacer.value);
-        this.writeViewNumber(Uint16, offset, Number(sampleFrameLength.value));
-        offset = this.getViewValueOffset(FLOAT_SIZE, offset + SHORT_SIZE);
-
-        for (const input of inputs) {
-            for (const channel of input) {
-                for (const sample of channel) {
-                    this.writeViewNumber(Float32, offset, sample);
-                    offset = this.getViewValueOffset(FLOAT_SIZE, offset + FLOAT_SIZE);
-                }
-            }
-            this.writeViewNumber(Float32, offset, inputSpacer.value);
-            offset = this.getViewValueOffset(FLOAT_SIZE, offset + FLOAT_SIZE);
+    public writeProcess(inputs: Process): 0 | 1 {
+        const { inputSpacer, processSpacerStart, processSpacerEnd } = AudioDataManager.RESERVED_BODY_VALUES;
+        const { arr } = this;
+        const { processHeadIndex } = this.getHeader("processHeadIndex");
+        const sampleFrameLength = inputs[0][0].length;
+        
+        let writeIndex = Number(processHeadIndex);
+        // TODO: implement a check for if another process gets overwritten by
+        // checking if the value at the current index is a processSpacerStart.
+        const writeBody = (value: number): void => {
+            writeIndex = this.loopIndex(writeIndex);
+            arr[writeIndex] = Float32.normalizeValue(value);
+            writeIndex = this.loopIndex(writeIndex+1);
         }
 
-        this.writeViewNumber(Float32, offset, processSpacer.value);
-        offset = this.getViewValueOffset(SHORT_SIZE, offset + FLOAT_SIZE);
-        this.setHeader({ headProcessOffset: BigInt(offset) });
+        writeBody(processSpacerStart);
+        writeBody(sampleFrameLength);
+        for (let i=0; i<inputs.length; i++) {
+            const input = inputs[i];
+
+            for (let j=0; j<input.length; j++) {
+                const channel = input[j];
+
+                for (let k=0; k<channel.length; k++) {
+                    const sample = channel[k];
+                    writeBody(sample);
+                }
+                // NOTE: adding channel spacers may provide a performance benefit in the future
+            }
+            writeBody(inputSpacer);
+        }
+
+        writeBody(processSpacerEnd);
+        this.setHeader({ processHeadIndex: writeIndex });
         return 0;
     }
 
-    public readProcess(byteOffset: number, searchDirection: -1 | 1 = -1): Float32Array[][] {
-        const { processSpacer, inputSpacer, blankFlag } = AudioDataManager["RESERVED_BODY_VALUES"];
-        const resValues = Object.values(AudioDataManager.RESERVED_BODY_VALUES).map((wrapped) => wrapped.value);
-        const { view } = this;
-        const SHORT_SIZE = Uint16.BYTES;
-        const FLOAT_SIZE = Float32.BYTES;
-        const inputs: Float32Array[][] = [];
-        byteOffset = this.findNextProcess(byteOffset, searchDirection);
-        byteOffset = this.getViewValueOffset(SHORT_SIZE, byteOffset);
-        console.log(`actual read starting offset: ${byteOffset}`);
+    public clearBody(): void {
+        for (let i=0; i<this.arr.length; i++) {
+            this.arr[i] = 0;
+        }
+        this.setHeader({ processHeadIndex: 0 });
+    }
 
-        const sampleFrameLength = this.readViewNumber(Uint16, byteOffset);
-        console.log("sample frame length: " + sampleFrameLength);
-        console.log("frame length? " + this.view.getUint16(byteOffset, true));
-        byteOffset = this.getViewValueOffset(FLOAT_SIZE,
-            this.getViewOffset(byteOffset + SHORT_SIZE)
-        );
-        const viewOffsetFloat = new Float32(this.readViewNumber(Float32, byteOffset));
+    public readProcess(index: number): Process {
+        const { processSpacerEnd, inputSpacer } = AudioDataManager["RESERVED_BODY_VALUES"];
+        const { arr } = this;
+        const inputs: Process = [];
 
-        let iterations = 0; // For testing
+        index = this.loopIndex(this.findNextProcess(index)+1);
+        const sampleFrameLength = arr[index];
+        index = this.loopIndex(index+1);
+        const curr = new Float32(arr[index]);
+
         // Iterate through all inputs
-        while(viewOffsetFloat.value !== processSpacer.value) {
-            const input: Float32Array[] = [];
+        while(curr.value !== processSpacerEnd) {
+            const input: Process[number] = [];
             
             // Iterate through all input channels
-            while(viewOffsetFloat.value !== inputSpacer.value) {
+            while(curr.value !== inputSpacer) {
                 const channel = new Float32Array(sampleFrameLength);
-                console.log("sample frame length: " + sampleFrameLength);
-                throw new Error("u gae");
 
                 // Iterate through all channel samples
                 let i = 0;
-                // const msgs: string[] = [];
-                // const offsets: string[] = [];
-                while(i < sampleFrameLength) {
-                    // offsets.push(`${byteOffset} / ${view.byteLength}`);
-                    if (byteOffset + FLOAT_SIZE < view.byteLength) {
-                        // msgs.push("giggity");
-                        viewOffsetFloat.value = this.readViewNumber(Float32, byteOffset);
-
-                        if (!resValues.includes(viewOffsetFloat.value)) {
-                            channel[i] = viewOffsetFloat.value;
-                            i++;
-                            console.log("bollocks");
-                        }
-                    } else {
-                        // msgs.push("goo");
-                    }
-
-                    byteOffset = this.getViewOffset(byteOffset + FLOAT_SIZE);
-
-                    if (iterations++ >= 1_000) {
-                        // console.error(`Header size: ${AudioDataManager["HEADER_SIZE"]}`);
-                        // console.error(JSON.stringify(offsets.slice(0, 20), null, 4));
-                        // console.error("Goos: "+
-                        //     JSON.stringify(msgs.filter((str) => str === "goo"), null, 4)
-                        // );
-                        throw new Error("Too much iteration");
-                    }
+                for (; i < sampleFrameLength; i++) {
+                    const sampleIndex = this.loopIndex(index+i);
+                    curr.value = arr[sampleIndex];
+                    channel[i] = curr.value;
                 }
 
-                viewOffsetFloat.value = this.readViewNumber(Float32, byteOffset);
+                index = this.loopIndex(index+i);
+                curr.value = arr[index];
                 input.push(channel);
             }
 
-            viewOffsetFloat.value = this.readViewNumber(Float32, byteOffset);
+            index = this.loopIndex(index+1);
+            curr.value = arr[index];
             inputs.push(input);
         }
 
         return inputs;
     }
 
-    public getProcessInfo(byteOffset: number): ProcessInfo {
-        byteOffset = this.findNextProcess(byteOffset);
-    }
+    /**
+     * Quickly reads a process and outputs its info
+     * @param indexValue 
+     * @param searchDirection 
+     * @returns 
+     */
+    public getProcessInfo(indexValue: number, searchDirection: -1 | 1 = -1): ProcessInfo {
+        indexValue = this.findNextProcess(indexValue, searchDirection);
+        const index = new Uint32(indexValue);
+        // TODO: use a faster method of reading the body to get the process info
+        // instead of relying on the readProcess method
+        const process = this.readProcess(index.value);
+        const processInfo = this.interpretProcessInfo(process);
 
-    public getAllProcessOffsets(): Array<number> {
-        const offsets: Array<number> = [];
-        let nextOffset = 0;
-
-        while (offsets.length <= 1 || (offsets.length > 1 && offsets[0] !== offsets[offsets.length-1])) {
-            nextOffset = this.findNextProcess(nextOffset, 1);
-            offsets.push(nextOffset);
-            nextOffset++;
-        }
-
-        if (offsets.length > 1) offsets.shift();
-        offsets.sort((a, b) => a - b);
-        return offsets;
+        return processInfo;
     }
 
     /**
-     * Find the next process offset in the buffer. If initial byteOffset is on sample frame size (process block start), return that offset
-     * @param byteOffset 
-     * @param searchDirection -1 = backwards | 1 = forwards
-     * @returns Byte offset of next process in buffer
+     * Use this method to get the ProcessInfo of an already-read process
+     * @param process 
+     * @param indexValue If the index of the process is not already known, search for it in the body
      */
-    public findNextProcess(byteOffset: number, searchDirection: -1 | 1 = -1): number {
-        const { processSpacer } = AudioDataManager["RESERVED_BODY_VALUES"];
-        const FLOAT_SIZE = Float32.BYTES;
-        const SHORT_SIZE = Int16.BYTES;
-
-        // Process block start visualization:
-        // ... | 4 | 4 (spacer) | 2 (sample frame length) | 4 | ...
-
-        const isProcessStartOffset = (offset: number): boolean => {
-            const spacerOffset = this.getViewValueOffset(FLOAT_SIZE, offset - FLOAT_SIZE);
-            const value = new Float32(this.readViewNumber(Float32, spacerOffset));
-            return value.value === processSpacer.value;
+    public interpretProcessInfo(process: Process, indexValue?: number): ProcessInfo {
+        const sampleFrameLength = new Float32(process[0][0].length);
+        const inputs: ProcessInfo["inputs"] = [];
+        for (const processInput of process) {
+            const inputInfo: ProcessInfo["inputs"][number] = {
+                channelCount: new Uint8(processInput.length)
+            };
+            inputs.push(inputInfo);
         }
+
+        let index: Uint32;
+        if (indexValue !== undefined) {
+            index = new Uint32(indexValue);
+        } else {
+            index = new Uint32(this.searchProcess(process));
+        }
+
+        return {
+            index,
+            sampleFrameLength,
+            inputs
+        };
+    }
+
+    /**
+     * Efficiently finds a process's index in the body based on its data
+     * @param process 
+     * @returns NaN if the process's index could not be found
+     */
+    public searchProcess(process: Process): number | typeof NaN {
+        const getI = (processStartIndex: number, offset: number) => this.loopIndex(processStartIndex+offset);
+        const { processSpacerStart, inputSpacer, processSpacerEnd } = AudioDataManager.RESERVED_BODY_VALUES;
+        const { arr } = this;
+        const formatted = formatProcess();
+
+        const searchedIndices: Set<number> = new Set();
+        let processI: number = this.findNextProcess(0, 1);
         
-        const errorValues: string[] = [];
-        // TODO: need to handle when there are no processes
-        while(!isProcessStartOffset(byteOffset)) {
-            if (errorValues.length >= 50_000_000) {
-                const shortened = errorValues.slice(errorValues.length-15);
-                throw new Error(
-                    `Too much iteration (View byteLength: ${this.view.byteLength})\n`+
-                    `${JSON.stringify(shortened, null, 4)}`
-                );
+        while(!isNaN(processI) && !searchedIndices.has(processI)) {
+            let pos = 0;
+            let matched = true;
+
+            while(arr[getI(processI, pos)] !== processSpacerEnd) {
+                if (arr[getI(processI, pos)] !== formatted[pos]) {
+                    matched = false;
+                    break;
+                }
+                pos++;
             }
-            errorValues.push(`Byte offset: ${byteOffset}`);
-            
-            // TODO: need to handle initial offsets that do not cleanly accomodate Shorts and Floats
-            // without just using value 1 for increment/decrement (performance concerns).
-            // This is because even if you use 2 for increment, offset wrapping in the body may lead to
-            // an awkward offset being reached, so currently value 1 solves this issue.
-            // 
-            // An idea is to make the total body size divisible by 2 or 4, but this still leads to 2 checks (instead of 4)
-            // occuring for every 4 byte value, which is still inefficient.
-            // 
-            // Another idea is to have ALL values in body be Float32, but this may undermine the
-            // purpose of even using DataView if only header will be utilizing different number sizes,
-            // making a TypedArray for body and a different data structure for the header more appealing.
-            // 
-            // Testing needed to verify if a new solution is warranted, but this is likely what should happen.
-            // The fact that blankFlags are being used is disregarding the whole point of using different number types: to save buffer space.
-            byteOffset = this.getViewOffset(byteOffset + (1 * searchDirection));
+
+            if (matched) return processI;
+
+            searchedIndices.add(processI);
+            processI = this.findNextProcess(processI+pos, 1);
+        }
+        
+        return NaN;
+
+        function formatProcess(): number[] {
+            const sampleFrameLength = process[0][0].length;
+            const values: number[] = [processSpacerStart, sampleFrameLength];
+            for (let i=0; i<process.length; i++) {
+                for (let j=0; j<process[i].length; j++) {
+                    for (let k=0; k<sampleFrameLength; k++) {
+                        values.push(process[i][j][k]);
+                    }
+                }
+                values.push(inputSpacer);
+            }
+            values.push(processSpacerEnd);
+            return values;
+        }
+    }
+
+    public getAllProcessIndices(): number[] {
+        const indices: number[] = [];
+
+        let next = 0;
+        while(
+            !isNaN(next = this.findNextProcess(this.loopIndex(next))) &&
+            (indices.length < 2 || indices[0] !== indices[indices.length-1])
+        ) {
+            indices.push(next);
+            next++;
         }
 
-        return byteOffset;
-    }
-
-    private writeViewNumber<
-        T extends NumberWrapperTypes
-    >(type: T, byteOffset: number, value: WrapperValue<T>): void {
-        type ViewSetter = (byteOffset: number, value: WrapperValue<T>, littleEndian: boolean) => void;
-        const { view } = this;
-        const name = `set${AudioDataManager.getViewMethodName(type)}` as keyof typeof view;
-        const method = (view[name] as ViewSetter).bind(view);
-
-        byteOffset = this.getViewValueOffset(type.BYTES, byteOffset);
-        method(byteOffset, value, true);
-    }
-
-    private readViewNumber<
-        T extends NumberWrapperTypes
-    >(type: T, byteOffset: number): WrapperValue<T> {
-        type ViewGetter = (byteOffset: number, littleEndian: boolean) => WrapperValue<T>;
-        const { view } = this;
-        const name = `get${AudioDataManager.getViewMethodName(type)}` as keyof typeof view;
-        const method = (view[name] as ViewGetter).bind(view);
-        
-        byteOffset = this.getViewValueOffset(type.BYTES, byteOffset);
-        const value = method(byteOffset, true);
-
-        return value;
+        indices.shift();
+        indices.sort((a, b) => a - b);
+        return indices;
     }
 
     /**
-     * 
-     * @param size Expected byte size of the value at the given byte offset
-     * @param byteOffset 
-     * @returns 
+     * Find the next process index in the body. If initial index is on processSpacerStart, return that index
+     * @param index 
+     * @returns Index of next process in body
      */
-    private getViewValueOffset(size: number, byteOffset: number): number {
-        const { view } = this;
-        byteOffset = this.getViewOffset(byteOffset);
-        const blankCount = byteOffset + size >= view.byteLength
-            ? (view.byteLength - byteOffset) % size
-            : 0;
-        byteOffset = this.getViewOffset(blankCount + byteOffset);
-        return byteOffset;
+    public findNextProcess(index: number, searchDirection: -1 | 1 = 1): number {
+        const { processSpacerStart } = AudioDataManager["RESERVED_BODY_VALUES"];
+        const { arr } = this;
+
+        const isProcessStartOffset = (): boolean => {
+            const i = this.loopIndex(index);
+            const curr = Float32.normalizeValue(arr[i]);
+            return curr === processSpacerStart;
+        }
+
+        // TODO: need to handle when there are no processes
+        while(!isProcessStartOffset()) {
+            // NOTE: may want to optimize this by reducing the amount of iterations by calculating
+            // the sample frame length from the amount of items in each channel
+            index = this.loopIndex(index + searchDirection);
+        }
+
+        return index;
     }
 
     /**
-     * Treats byteOffset like an index, and the body is like a circular buffer. If last byte is exceeded, offset goes back to body offset
-     * @param byteOffset 
+     * If the end of the body array is exceeded, index loops back to beginning of body. Otherwise returns inputted index. Negative byte offsets wrap back to the end of the body.
+     * @param index 
      * @returns 
      */
-    private getViewOffset(byteOffset: number): number {
-        const { headerLayoutEnd } = AudioDataManager["RESERVED_BODY_VALUES"];
-        const bodyOffset = AudioDataManager["HEADER_SIZE"] + (headerLayoutEnd.constructor as typeof Float32).BYTES;
-        const viewSize = this.view.byteLength;
-        const bodySize = viewSize - bodyOffset;
-        byteOffset -= bodyOffset;
-
-        // Negative byte offsets wrap back to the end of the buffer. Positives remain at their value
-        const wrapped = ((byteOffset % bodySize) + bodySize) % bodySize;
-        return wrapped + bodyOffset;
+    private loopIndex(index: number): number {
+        const arrLength = this.arr.length;
+        return ((index % arrLength) + arrLength) % arrLength;
     }
 
     /**
