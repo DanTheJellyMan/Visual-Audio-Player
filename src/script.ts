@@ -1,3 +1,4 @@
+import AudioDataManager from "./analyser/AudioDataManager";
 import AdvancedAnalyserNode from "./analyser/AdvancedAnalyserNode";
 
 // const worker = new Worker(new URL("./render-engine/worker.ts", import.meta.url));
@@ -6,11 +7,23 @@ const audioInput = document.querySelector("#audio-input")!;
 const audio = document.querySelector("#music")! as HTMLAudioElement;
 const audioContext = new AudioContext();
 const analyser = await AdvancedAnalyserNode.create(audioContext);
-const sourceNode = audioContext.createMediaElementSource(audio);
+const manager = new AudioDataManager(analyser.sab);
 
+const sourceNode = audioContext.createMediaElementSource(audio);
 sourceNode
 .connect(analyser)
 .connect(audioContext.destination);
+
+await audioContext.suspend();
+
+audio.addEventListener("play", async (e) => {
+    await audioContext.resume();
+});
+audio.addEventListener("pause", async (e) => {
+    await audioContext.suspend();
+    const { processHeadIndex } = manager.getHeader("processHeadIndex");
+    console.log(manager.readProcess(processHeadIndex));
+});
 
 audioInput.addEventListener("input", (e) => {
     const target: HTMLInputElement = e.target! as HTMLInputElement;
@@ -27,4 +40,5 @@ function setAudioSrc(audio: HTMLAudioElement, file: File): void {
     }
     const url = URL.createObjectURL(file);
     audio.src = url;
+    console.log(`audio src:\t${url}`);
 }

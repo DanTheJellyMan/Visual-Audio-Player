@@ -31,11 +31,11 @@ class AdvancedAnalyserProcessor extends AudioWorkletProcessor {
     constructor(options: AudioWorkletNodeOptions) {
         super();
         this.options = options;
-        
-        this.port.addEventListener("message", this.handleMessage.bind(this));
+
+        this.port.onmessage = this.handleMessage.bind(this);
     }
 
-    private handleMessage(e: MessageEvent<MessagePayload>) {
+    private handleMessage(e: MessageEvent<MessagePayload>): void {
         const { type, data } = e.data;
 
         switch(type) {
@@ -62,23 +62,24 @@ class AdvancedAnalyserProcessor extends AudioWorkletProcessor {
                 currentTime,
                 fftRatio: config.fftRatio
             });
+
+            const result = manager.writeProcess(inputs);
+            if (result !== 0) {
+                console.error(`AudioDataManager process writing error (${result})`);
+            }
         }
 
-        copyArrayTo(inputs, outputs);
+        copyInputsToOutputs(inputs, outputs);
         return true;
     }
 }
 
 registerProcessor("advanced-analyser-processor", AdvancedAnalyserProcessor);
 
-function copyArrayTo(source: unknown[], target: unknown[]): void {
-    for (let i=0; i<source.length; i++) {
-        const it1Proto = Object.getPrototypeOf(source[i]);
-        const it2Proto = Object.getPrototypeOf(target[i]);
-        if (it1Proto === Array.prototype && it2Proto === Array.prototype) {
-            copyArrayTo(source[i] as unknown[], target[i] as unknown[]);
-        } else {
-            target[i] = source[i];
+function copyInputsToOutputs(inputs: Process, outputs: Process): void {
+    for (let i=0; i<inputs.length; i++) {
+        for (let j=0; j<inputs[i].length; j++) {
+            outputs[i][j].set(inputs[i][j]);
         }
     }
 }

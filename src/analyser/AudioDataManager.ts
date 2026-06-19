@@ -222,12 +222,12 @@ export default class AudioDataManager {
         this.setHeader({ processHeadIndex: 0 });
     }
 
-    public readProcess(index: number): Process {
+    public readProcess(index: number, searchDirection: -1 | 1 = 1): Process {
         const { processSpacerEnd, inputSpacer } = AudioDataManager["RESERVED_BODY_VALUES"];
         const { arr } = this;
         const inputs: Process = [];
 
-        index = this.loopIndex(this.findNextProcess(index)+1);
+        index = this.loopIndex(this.findNextProcess(index, searchDirection)+searchDirection);
         const sampleFrameLength = arr[index];
         index = this.loopIndex(index+1);
         const curr = new Float32(arr[index]);

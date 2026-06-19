@@ -43,11 +43,19 @@ export default class AdvancedAnalyserNode extends AudioWorkletNode {
                 sab
             }
         };
-
         this.port.postMessage(msg);
-        this.sab = sab;
+        this.port.onmessage = this.handleMessage.bind(this);
 
+        this.sab = sab;
         this.assignConfig(this.config);
+    }
+
+    private handleMessage(e: MessageEvent<MessagePayload>): void {
+        const { type, data } = e.data;
+
+        switch(type) {
+            
+        }
     }
 
     public assignConfig(config: Partial<Config>): void {
@@ -61,6 +69,11 @@ export default class AdvancedAnalyserNode extends AudioWorkletNode {
         this.port.postMessage(msg);
     }
 
+    /**
+     * Loads processor into module, then instanciates the analyser
+     * @param context 
+     * @returns 
+     */
     public static async create(context: AudioContext): Promise<AdvancedAnalyserNode> {
         const processorUrl = new URL("./AdvancedAnalyserProcessor", import.meta.url);
         await context.audioWorklet.addModule(processorUrl);
