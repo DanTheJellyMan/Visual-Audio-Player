@@ -6,6 +6,7 @@
         "rootDir": ".",
         "types": [
             "@types/audioworklet",
+            "@webgpu/types",
             "vite/client"
         ],
         "moduleResolution": "bundler"

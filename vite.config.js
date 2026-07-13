@@ -23,6 +23,6 @@ export default defineConfig({
         // },
         // mockReset: true,
         pool: "vmThreads",
-        vmMemoryLimit: "2GB"
+        vmMemoryLimit: "50MB"
     }
 });

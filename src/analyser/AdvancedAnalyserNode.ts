@@ -11,14 +11,14 @@ export type Config = {
 };
 
 export type MessagePayload =
-    {
-        type: "init",
-        data: InitData
-    } |
-    {
-        type: "config-update",
-        data: Config
-    }
+{
+    type: "init",
+    data: InitData
+} |
+{
+    type: "config-update",
+    data: Config
+}
 ;
 
 export default class AdvancedAnalyserNode extends AudioWorkletNode {    

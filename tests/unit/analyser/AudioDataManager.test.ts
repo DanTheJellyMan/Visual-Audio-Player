@@ -1,9 +1,9 @@
 import { TestFunction, test, expect } from "vitest";
+import stringifyArrays from "../../../src/utils/stringifyArray";
 import { randInt, randFloat } from "../../../src/utils/randomNumber";
 import arrayEquals from "../../../src/utils/arrayEquals";
 import { Float32 } from "../../../src/utils/numberWrappers";
-import AudioDataManager from "../../../src/analyser/AudioDataManager";
-import { normalizeModuleId } from "vite/module-runner";
+import AudioDataManager, { Process } from "../../../src/analyser/AudioDataManager";
 
 const RANDOM_TESTING = true as const;
 const MANAGER_CONFIG = getManagerConfig(RANDOM_TESTING);
@@ -12,6 +12,7 @@ const bufSize = AudioDataManager.estimateBufSize(
     MANAGER_CONFIG.inputCount,
     MANAGER_CONFIG.maxChannelCount
 ); // TODO: investigate why the test gets frozen when modifying this value
+console.log(`Buffer byte length: ${bufSize}`);
 
 const buf = new ArrayBuffer(bufSize);
 const manager = new AudioDataManager(buf);
@@ -34,35 +35,56 @@ const testHeader: TestFunction = function(context) {
 const testSampleReadWrite: TestFunction = function(context) {
     console.log(`Manager config: ${JSON.stringify(MANAGER_CONFIG, null, 4)}`);
     
-    const { randomTesting, fftRatio, sampleFrameLength, inputCount, maxChannelCount } = MANAGER_CONFIG;
-    const samplesPerProcess = sampleFrameLength * maxChannelCount * inputCount;
-    const requiredProcessCount = Math.ceil((2**fftRatio) / samplesPerProcess);
-    const inputProcesses: Float32Array[][][] = [];
-    // console.log("required process count: " + requiredProcessCount + ", samplesPerProcess: " + samplesPerProcess);
-    
-    for (let i=0; i<requiredProcessCount; i++) {
-        const inputs: Float32Array[][] = new Array(inputCount)
+    const { randomTesting, sampleFrameLength, inputCount, maxChannelCount } = MANAGER_CONFIG;
+    const requiredProcessCount = estimateRequiredProcesses(MANAGER_CONFIG);
+    const inputProcesses: Process[] = new Array(requiredProcessCount)
+    .fill(null)
+    .map(() => new Array(inputCount)
         .fill(null)
         .map(() => generateInput(
             randomTesting ? randInt(1, maxChannelCount) : maxChannelCount,
             sampleFrameLength,
             randomTesting
-        ));
-        inputProcesses.push(inputs);
+        ))
+    );
+    const processWriteTimes = new Uint32Array(requiredProcessCount);
 
-        const writeStatus = manager.writeProcess(inputs);
+    for (let i=0; i<requiredProcessCount; i++) {
+        const startT = performance.now();
+        const writeStatus = manager.writeProcess(inputProcesses[i]);
+        processWriteTimes[i] = performance.now() - startT;
+
         expect(writeStatus, "Write successful?").toBe(0);
-        // console.log(`HEAD_PROCESS_INDEX: ${manager.getHeader("processHeadIndex").processHeadIndex}`);
     }
+    const maxProcessWriteTime = processWriteTimes.reduce((prev,curr)=>Math.max(curr,prev));
+    const avgProcessWriteTime = processWriteTimes.reduce((prev,curr)=>prev+curr)/processWriteTimes.length;
+    console.log(
+        `Process write times (${processWriteTimes.length}):\n`
+        +`\tMax: ${maxProcessWriteTime}ms\n`
+        +`\tAverage: ${avgProcessWriteTime}ms`
+        // +`\nAll: [${processWriteTimes.join(", ")}]`
+        +`\n`
+    );
 
     const processIndices = manager.getAllProcessIndices();
-    console.log(`process-start indices: ${processIndices.join(", ")}`);
+    console.log(`process-start indices: ${processIndices.join(", ")}\n`);
 
-    const startT = performance.now();
-    const outputProcesses = processIndices.map((index) =>
-        manager.readProcess(manager.findNextProcess(index))
+    const processReadTimes = new Uint32Array(processIndices.length);
+    const outputProcesses = processIndices.map((index, i) => {
+        const startT = performance.now();
+        const process = manager.readProcess(manager.findNextProcess(index));
+        processReadTimes[i] = performance.now() - startT;
+        return process;
+    });
+    const maxProcessReadTime = processReadTimes.reduce((prev,curr)=>Math.max(curr,prev));
+    const avgProcessReadTime = processReadTimes.reduce((prev,curr)=>prev+curr)/processReadTimes.length;
+    console.log(
+        `Process read times (${processWriteTimes.length}):\n`
+        +`\tMax: ${maxProcessReadTime}ms\n`
+        +`\tAverage: ${avgProcessReadTime}ms`
+        // +`\nAll: [${processReadTimes.join(", ")}]`
+        +`\n`
     );
-    console.log(`Total process read time: ${performance.now() - startT}ms`);
 
     expect(inputProcesses.length).toBe(outputProcesses.length);
     for (let i=0; i<inputProcesses.length; i++) {
@@ -82,11 +104,103 @@ const testProcessSearch: TestFunction = function(context) {
     }
 }
 
+const testSampleGetter: TestFunction = function(context) {
+    const { inputCount, maxChannelCount, sampleRate, fftRatio, sampleFrameLength, randomTesting } = MANAGER_CONFIG;
+    const buf = new ArrayBuffer(AudioDataManager.estimateBufSize(inputCount, maxChannelCount));
+    const cMan = new AudioDataManager(buf);
+    const processes: Process[] = [];
+    const requiredProcesses = estimateRequiredProcesses(MANAGER_CONFIG);
+    cMan.initHeader(sampleRate, fftRatio);
+    
+    // TODO: in the future, all inputs and channels will need to be tested, and not just a single random one like now
+    const inputIndex = randInt(0, inputCount-1);
+    const channelIndex = randInt(0, maxChannelCount-1);
+    const sampleCount = randInt(1, ((sampleFrameLength * requiredProcesses)-1) / 2);
+    
+    // For testing
+    const printSampleCount = 50;
+    const tempTestSamples: number[] = [];
+
+    for (let i=0; i<requiredProcesses; i++) {
+        const inputs: Process = [];
+        for (let j=0; j<inputCount; j++) {
+            const input = generateInput(maxChannelCount, sampleFrameLength, randomTesting);
+            inputs.push(input);
+        }
+        processes.push(inputs);
+
+        const status = cMan.writeProcess(inputs);
+        expect(status).toBe(0);
+
+        // For testing
+        tempTestSamples.push(...inputs[inputIndex][channelIndex]);
+    }
+
+    const cManSamples = cMan.getSamples(inputIndex, channelIndex, sampleCount);
+
+    // For testing
+    let temp1 = processes[0][inputIndex][channelIndex];
+    temp1 = temp1.slice(temp1.length-cManSamples.length).map(Float32.normalizeValue);
+    let temp2 = cManSamples.slice(0, temp1.length).map(Float32.normalizeValue);
+    const equalTemps = !temp1.some((num, i) => num !== temp2[i]);
+    if (!equalTemps) {
+        console.log("og", temp1);
+        console.log("getter", temp2);
+    }
+    console.log("sample equality?", equalTemps, `(${temp1.length}, ${temp2.length})`);
+
+    // For testing
+    // const cManSamplesToPrint = cManSamples.slice(cManSamples.length-printSampleCount);
+    // console.log(`Original samples: [\n\t${tempTestSamples.slice(tempTestSamples.length - cManSamplesToPrint.length).join(", --\n\t")} --\n]`);
+    // console.log(`getSamples(): [\n\t${cManSamplesToPrint.join(",\n\t")}\n]`);
+    
+    // Verify that the pattern of samples can be found within the body
+    const foundPatterns = cMan.searchSamples(cManSamples.slice(0, sampleFrameLength), 1);
+    console.log(`searchSamples patterns:`, foundPatterns);
+    expect(foundPatterns.length).greaterThan(0);
+    throw new Error("bruh moment");
+
+    let sampleCounter = 0;
+    for (let i=0; sampleCounter<sampleCount; i++) {
+        const channel = processes[i][inputIndex][channelIndex];
+        for (let j=0; j<channel.length; j++) {
+            /* For testing */
+            (function(){
+                const pRange = 8;
+                const inputSlice = channel.slice(
+                    Math.max(0, j - Math.round(pRange/2)),
+                    j + Math.ceil(pRange/2)
+                ).map((float) => Float32.normalizeValue(float));
+                const outputSlice = cManSamples.slice(
+                    Math.max(0, sampleCounter - Math.round(pRange/2)),
+                    sampleCounter + Math.ceil(pRange/2)
+                ).map((float) => Float32.normalizeValue(float));
+                console.log(stringifyArrays(
+                    ["Input:", "Output:"],
+                    [inputSlice, outputSlice],
+                    false
+                ));
+            })();
+            /* --- */
+
+            const sample = channel[j];
+            expect(
+                Float32.normalizeValue(sample)
+            ).toBe(
+                Float32.normalizeValue(cManSamples[sampleCounter++])
+            );
+            throw new Error("brehhh");
+        }
+        throw new Error("nice cock");
+    }
+}
+
 test("Stores and reads header values back correctly", testHeader);
 test(testSampleReadWrite, testSampleReadWrite);
 test(testProcessSearch, testProcessSearch);
+test(testSampleGetter, testSampleGetter);
 
-function compareProcesses<P extends Float32Array[][]>(process1: P, process2: P): void {
+function compareProcesses(process1: Process, process2: Process): void {
     const factor = 10 ** 5;
     const normalizeSample = (value: number): number => Math.floor(
         Float32.normalizeValue(value) * factor
@@ -121,7 +235,7 @@ function compareProcesses<P extends Float32Array[][]>(process1: P, process2: P):
     }
 }
 
-function generateInput(channelCount: number, sampleCount: number, random: boolean = true): Float32Array[] {
+function generateInput(channelCount: number, sampleCount: number, random: boolean = true): Process[number] {
     const input = new Array(channelCount);
     for (let c=0; c<channelCount; c++) {
         const channel = new Float32Array(sampleCount);
@@ -136,6 +250,13 @@ function generateInput(channelCount: number, sampleCount: number, random: boolea
         input[c] = channel;
     }
     return input;
+}
+
+function estimateRequiredProcesses(config: typeof MANAGER_CONFIG): number {
+    const { fftRatio, sampleFrameLength, inputCount, maxChannelCount } = config;
+    const samplesPerProcess = sampleFrameLength * maxChannelCount * inputCount;
+    const requiredProcessCount = Math.ceil((2**fftRatio) / samplesPerProcess);
+    return requiredProcessCount;
 }
 
 /**

@@ -24,6 +24,7 @@ export type Process = Float32Array[][];
 
 export type ProcessInfo = {
     index: InstanceType<typeof AudioDataManager["HEADER_LAYOUT_WRAPPERS"]["processHeadIndex"]>,
+    totalSampleCount: Uint64,
     sampleFrameLength: Float32,
     inputs: {
         channelCount: Uint8
@@ -31,6 +32,7 @@ export type ProcessInfo = {
 };
 
 // NOTE: In the future, the sample-frame sizes of data blocks may change over time, according to MDN
+
 /**
  * Handles reads and writes to a buffer containing raw audio data.
  * 
@@ -179,6 +181,7 @@ export default class AudioDataManager {
      * @returns If there is not enough space in buffer to write, returns 1, otherwise 0 for success
      */
     public writeProcess(inputs: Process): 0 | 1 {
+        // TODO: for all body read/write methods, use Atomics
         const { inputSpacer, processSpacerStart, processSpacerEnd } = AudioDataManager.RESERVED_BODY_VALUES;
         const { arr } = this;
         const { processHeadIndex } = this.getHeader("processHeadIndex");
@@ -201,11 +204,17 @@ export default class AudioDataManager {
             for (let j=0; j<input.length; j++) {
                 const channel = input[j];
 
+                /* NOTE: an optimization, like the one in the getSamples method, can be made so that
+                    1 or 2 subarrays, from the getSubarrays method, and .set() calls can be made to improve copy speed,
+                    as opposed to the current iteration done over all channel's samples.
+                */
                 for (let k=0; k<channel.length; k++) {
                     const sample = channel[k];
                     writeBody(sample);
                 }
-                // NOTE: adding channel spacers may provide a performance benefit in the future
+
+                // NOTE: adding channel spacers may provide a performance benefit in the future,
+                // but will also require a lot of logic rewriting in most of the class methods.
             }
             writeBody(inputSpacer);
         }
@@ -216,13 +225,12 @@ export default class AudioDataManager {
     }
 
     public clearBody(): void {
-        for (let i=0; i<this.arr.length; i++) {
-            this.arr[i] = 0;
-        }
+        this.arr.fill(0);
         this.setHeader({ processHeadIndex: 0 });
     }
 
     public readProcess(index: number, searchDirection: -1 | 1 = 1): Process {
+        // TODO: for all body read/write methods, use Atomics
         const { processSpacerEnd, inputSpacer } = AudioDataManager["RESERVED_BODY_VALUES"];
         const { arr } = this;
         const inputs: Process = [];
@@ -232,6 +240,9 @@ export default class AudioDataManager {
         index = this.loopIndex(index+1);
         const curr = new Float32(arr[index]);
 
+        // NOTE: it may be wise to accomodate for processes that have been overwritten in the body
+        // since a spacer may end up being found in an unexpected place.
+
         // Iterate through all inputs
         while(curr.value !== processSpacerEnd) {
             const input: Process[number] = [];
@@ -240,6 +251,7 @@ export default class AudioDataManager {
             while(curr.value !== inputSpacer) {
                 const channel = new Float32Array(sampleFrameLength);
 
+                /* NOTE: use the getSamples method instead to quickly get a copy of the channel's samples */
                 // Iterate through all channel samples
                 let i = 0;
                 for (; i < sampleFrameLength; i++) {
@@ -261,6 +273,122 @@ export default class AudioDataManager {
         return inputs;
     }
 
+    public getSamples(inputIndex: number, channelIndex: number, sampleCount: number, startIndex = this.getHeader("processHeadIndex").processHeadIndex-1, searchDirection: -1 | 1 = -1): Float32Array {
+        const paramInfo = `inputIndex: ${inputIndex}, channelIndex: ${channelIndex}, sampleCount: ${sampleCount}`;
+        const INP_OOB_ERR = new Error(`Input index out of bounds - ${paramInfo}`);
+        const CH_OOB_ERR = new Error(`Channel index out of bounds - ${paramInfo}`);
+        const { processSpacerStart, processSpacerEnd, inputSpacer } = AudioDataManager.RESERVED_BODY_VALUES;
+        const { arr } = this;
+        const samples = new Float32Array(sampleCount);
+        let totalSampleCount = 0;
+
+        // NOTE: it may be wise to accomodate for processes that have been overwritten in the body
+        // since a spacer may end up being found in an unexpected place.
+        
+        // Testing variable
+        // let iterations = 0;
+
+        // Iterate over the body's processes
+        startIndex = this.findNextProcess(startIndex, searchDirection);
+        let index = startIndex;
+        do {
+            const processStartIndex = index;
+            index = this.loopIndex(index+1);
+            const sampleFrameLength = arr[index];
+            index = this.loopIndex(index+1);
+
+            // Find the specified input
+            for (let i=0; i<inputIndex; i++) {
+                if (Float32.normalizeValue(arr[index]) === processSpacerEnd) {
+                    throw INP_OOB_ERR;
+                }
+                
+                while(Float32.normalizeValue(arr[index]) !== inputSpacer) {
+                    index = this.loopIndex(index + sampleFrameLength);
+                }
+                
+                index = this.loopIndex(index + 1);
+            }
+            if (Float32.normalizeValue(arr[index]) === processSpacerEnd) {
+                throw INP_OOB_ERR;
+            }
+
+            // Find the specified channel
+            for (let c=0; c<channelIndex; c++) {
+                index = this.loopIndex(index + sampleFrameLength);
+                if (Float32.normalizeValue(arr[index]) === inputSpacer) {
+                    throw CH_OOB_ERR;
+                }
+            }
+
+            // TODO: fix issues of values being incorrect
+
+            /**
+             * This is meant for preventing too many samples from being set onto samples by removing excess samples from a half, starting from the end of the half
+             * @param h 
+             * @returns 
+             */
+            const sliceSubarray = (h: Float32Array) => {
+                const neededSamples = sampleCount - totalSampleCount;
+                const hLen = Math.min(h.length, neededSamples);
+                const start = Math.max(0, h.length - hLen);
+                // console.log(`needed: ${neededSamples} - kept samples: ${hLen} - slice range: [${start}, ${h.length})`);
+                return h.slice(start, h.length);
+            };
+            const halves = this.getSubarrays(index, sampleFrameLength);
+            let offset: number;
+
+            if (halves.length === 2) {
+                const h2 = sliceSubarray(halves[1]!);
+                offset = sampleCount - totalSampleCount - h2.length;
+                // console.log("samples offset (h2): " + offset);
+                totalSampleCount += h2.length;
+                samples.set(h2, offset);
+            }
+
+            const h1 = sliceSubarray(halves[0]);
+            offset = sampleCount - totalSampleCount - h1.length;
+            // console.log("samples offset (h1): " + offset);
+            totalSampleCount += h1.length;
+
+            samples.set(h1, offset);
+            index = this.findNextProcess(processStartIndex+searchDirection, searchDirection);
+
+            // For testing
+            // if (iterations++ > 1_000_000) throw new Error("Too much iteration...");
+        } while(index !== startIndex && totalSampleCount < sampleCount);
+
+        return samples;
+    }
+
+    /**
+     * Get 1 or 2 Float32Arrays over the underlying buffer of the body. Modification of the bytes in these Float32Arrays will modify the body, and vice versa
+     * @param index 
+     * @param itemCount 
+     * @returns
+     * First item is the primary subarray may extend up to the end of the body.
+     * 
+     * The second item is the secondary subarray and extends "right" from the start of the body. It is only returned when the number of items from the index exceeds the body length (wrapping to the start).
+     */
+    private getSubarrays<Half extends Float32Array, H extends [Half, Half?]>(index: number, itemCount: number): H {
+        const { arr } = this;
+        if (itemCount > arr.length) {
+            throw new Error(`Too many items to retrieve: ${itemCount}/${arr.length}`);
+        }
+
+        const h1EndI = Math.min(index + itemCount, arr.length);
+        const h1 = arr.subarray(index, h1EndI) as Half;
+        const halves = [h1] as unknown as H;
+
+        if (h1EndI > arr.length) {
+            const h2EndI = h1EndI - arr.length;
+            const h2 = arr.subarray(0, h2EndI) as Half;
+            halves.push(h2);
+        }
+
+        return halves;
+    }
+
     /**
      * Quickly reads a process and outputs its info
      * @param indexValue 
@@ -273,7 +401,7 @@ export default class AudioDataManager {
         // TODO: use a faster method of reading the body to get the process info
         // instead of relying on the readProcess method
         const process = this.readProcess(index.value);
-        const processInfo = this.interpretProcessInfo(process);
+        const processInfo = this.interpretProcessInfo(process, index.value);
 
         return processInfo;
     }
@@ -281,16 +409,19 @@ export default class AudioDataManager {
     /**
      * Use this method to get the ProcessInfo of an already-read process
      * @param process 
-     * @param indexValue If the index of the process is not already known, search for it in the body
+     * @param indexValue If the index of the process is not provided, search for it in the body
      */
     public interpretProcessInfo(process: Process, indexValue?: number): ProcessInfo {
+        const totalSampleCount = new Uint64(0);
         const sampleFrameLength = new Float32(process[0][0].length);
         const inputs: ProcessInfo["inputs"] = [];
+
         for (const processInput of process) {
-            const inputInfo: ProcessInfo["inputs"][number] = {
+            const inputInfo = {
                 channelCount: new Uint8(processInput.length)
             };
             inputs.push(inputInfo);
+            totalSampleCount.value += BigInt(sampleFrameLength.value);
         }
 
         let index: Uint32;
@@ -302,6 +433,7 @@ export default class AudioDataManager {
 
         return {
             index,
+            totalSampleCount,
             sampleFrameLength,
             inputs
         };
@@ -354,6 +486,111 @@ export default class AudioDataManager {
             }
             values.push(processSpacerEnd);
             return values;
+        }
+    }
+
+    /**
+     * Similar to the searchProcess method, but takes an input array of samples to find a pattern for in the body.
+     * 
+     * When checking matches, RESERVED_BODY_VALUES automatically skipped. Example:
+     * 
+     * Input samples: [0.3, 0.6, 0.9]; Body: [(flag), 0.3, 0.6, (flag), 0.9, -0.5]; Valid match ✅
+     * @param samples 
+     * @param matchCount Number of matching patterns to return from the body
+     */
+    public searchSamples(samples: Float32Array, matchCount: number = 1): number[] {
+        // TODO: implement this method, which is primarily made for verifying that getSamples() works
+        const { arr } = this;
+        const { processSpacerEnd } = AudioDataManager.RESERVED_BODY_VALUES;
+        const rsbvSet = new Set(Object.values(AudioDataManager.RESERVED_BODY_VALUES));
+        const matches: number[] = [];
+        let index = this.findNextProcess(this.getHeader("processHeadIndex").processHeadIndex, -1);
+        const firstIndex = index;
+        let iterations = 0;
+        
+        // For testing
+        const indices: string[] = [];
+        
+        while(matches.length < matchCount && (index !== firstIndex || iterations++ === 0)) {
+            const startI = index;
+            let fullMatch = true;
+            index = this.loopIndex(index+2); // Skips over processSpacerStart and the sampleFrameLength
+
+            for (let i=0; i<samples.length; i++) {
+                let bodyVal: number;
+
+                while(rsbvSet.has(
+                    (bodyVal = Float32.normalizeValue(arr[index]))
+                )) {
+                    if (index === startI) {
+                        fullMatch = false;
+                        break;
+                    }
+
+                    // Must check for the end of the process, because the sampleFrameLength
+                    // of each new process must be manually skipped, as it's not a RESERVED_BODY_VALUE.
+                    const nextValue = Float32.normalizeValue(arr[this.loopIndex(index+1)]);
+                    if (nextValue === processSpacerEnd) {
+                        throw new Error("nigga what?");
+                        index = this.findNextProcess(index+1, 1);
+                        if (index === startI) {
+                            fullMatch = false;
+                            break;
+                        } else {
+                            index = this.loopIndex(index+2);
+                        }
+                    } else {
+                        index = this.loopIndex(index+1);
+                    }
+                }
+                
+                if (!fullMatch || index === startI) {
+                    fullMatch = false;
+                    break;
+                }
+
+                const sampleVal = Float32.normalizeValue(samples[i]);
+                if (bodyVal !== sampleVal) {
+                    fullMatch = false;
+                    break;
+                }
+
+                index = this.loopIndex(index+1);
+            }
+
+            if (fullMatch) {
+                matches.push(startI);
+            }
+
+            // TODO: find out why index is only 2 greater than startI
+            indices.push(`${startI} - ${index}`);
+            index = this.findNextProcess(startI-1, -1);
+        }
+        console.log("iterations: " + iterations);
+        console.log("indices: ");
+        console.log(indices);
+
+        return matches;
+    }
+
+    *iterateSamples(index: number, direction: -1 | 1) {
+        // TODO: finish creating this method. It will be used by searchSamples() to only iterate only over audio sample values.
+        // In the future, may want to replace this with an iterator instead of generator for performance (testing needed first)
+        const rsbvs = AudioDataManager.RESERVED_BODY_VALUES;
+        const { processSpacerStart, processSpacerEnd, inputSpacer } = rsbvs;
+
+        while(true) {
+            index = this.findNextProcess(index, direction);
+            const startI = index;
+
+            let value;
+
+            // TODO: if no data is in body (no reserved body values at all), throw an error
+            if (false) {
+                continue;
+            }
+
+            yield { index, value };
         }
     }
 
