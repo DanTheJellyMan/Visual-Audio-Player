@@ -23,6 +23,6 @@ export default function strictObjectAssign(target: Dictionary, src: Dictionary):
     }
 }
 
-function getConstructor(obj: Object): Function {
+function getConstructor<T>(obj: T): new (...args: any[]) => T {
     return Object.getPrototypeOf(obj).constructor;
 }

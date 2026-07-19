@@ -1,7 +1,9 @@
-import AudioDataManager from "./analyser/AudioDataManager";
-import AdvancedAnalyserNode from "./analyser/AdvancedAnalyserNode";
+import AudioDataManager from "../../src/analyser/AudioDataManager";
+import AdvancedAnalyserNode from "../../src/analyser/AdvancedAnalyserNode";
 
-// const worker = new Worker(new URL("./render-engine/worker.ts", import.meta.url));
+const worker = new Worker(new URL("./src/render-engine/worker", import.meta.url));
+console.log("worker:");
+console.log(worker);
 
 const audioInput = document.querySelector("#audio-input")!;
 const audio = document.querySelector("#music")! as HTMLAudioElement;

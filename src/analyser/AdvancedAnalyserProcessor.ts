@@ -10,7 +10,6 @@ type ParameterDescriptor = {
     maxValue: number,
     defaultValue: number
 };
-export type ParameterDescriptors = typeof AdvancedAnalyserProcessor["_parameterDescriptors"];
 
 class AdvancedAnalyserProcessor extends AudioWorkletProcessor {
     // TODO: figure out what to do about potential parameterDescriptors, like

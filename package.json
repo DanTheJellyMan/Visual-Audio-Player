@@ -5,8 +5,9 @@
   "main": "script.js",
   "scripts": {
     "test": "vitest -- --silent=false",
-    "build": "vite build",
-    "dev": "vite"
+    "dev": "vite --config vite.examples.config.ts",
+    "build": "vite build --config vite.config.ts && tsc -p tsconfig.build.json",
+    "preview": "vite preview --config vite.config.ts"
   },
   "repository": {
     "type": "git",
@@ -23,8 +24,6 @@
   "devDependencies": {
     "@types/audioworklet": "^0.0.98",
     "@webgpu/types": "^0.1.70",
-    "concurrently": "^9.2.1",
-    "cypress": "^15.15.0",
     "typescript": "^6.0.3",
     "vite": "^8.0.10",
     "vitest": "^4.1.7"

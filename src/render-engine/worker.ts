@@ -36,17 +36,9 @@ function handleMessage(e: MessageEvent<MessagePayload>): void {
         }
         case "config-update": {
             const cfg = config ? config : data;
-            const fps = cfg.fps;
             strictObjectAssign(cfg, data);
-
-            // if (cfg.fps !== fps) {
-            //     // TODO: implement the function or class to handle the render loop and use the loop-stopping/starting behavior here
-            //     if (intervalId !== undefined) {
-            //         clearInterval(intervalId);
-            //     }
-            //     setInterval(handler, 1000/fps);
-            // }
             config = cfg;
+
             break;
         }
         case "get-bitmap": {
@@ -54,6 +46,7 @@ function handleMessage(e: MessageEvent<MessagePayload>): void {
                 console.error("Cannot retrieve ImageBitmap from rendering canvas - uninitialized canvas context");
                 return;
             }
+            
             const bitmap = (ctx.canvas as OffscreenCanvas).transferToImageBitmap();
             self.postMessage(bitmap, [bitmap]);
         }

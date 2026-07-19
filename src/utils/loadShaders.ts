@@ -2,7 +2,7 @@
 
 /**
  * Import all .wgsl module files within a specified "shader-modules" folder, and concatenate the text content.
- * @param url Folder/directory must end with "shader-modules"
+ * @param pathname Folder/directory must end with "shader-modules"
  * @param exclude Either exclude or include listed modules by name
  * 
  * true (default): Exclude loading listed modules
@@ -11,13 +11,13 @@
  * @param modules 
  * @returns 
  */
-export default async function loadShaders(url: URL, exclude: boolean = true, modules: string[] = []): Promise<string> {
-    const validStatus = validatePath(url);
+export default async function loadShaders(pathname: string, exclude: boolean = true, modules: string[] = []): Promise<string> {
+    const validStatus = validatePath(pathname);
     if (Object.getPrototypeOf(validStatus).constructor === Error) {
         throw validStatus;
     }
 
-    const prefix = (exclude ? "!" : "") + url.pathname + "/";
+    const prefix = (exclude ? "!" : "") + pathname + "/";
     const globPatterns = modules
     .filter((modName) => modName.endsWith(".wgsl"))
     .map((modName) => prefix + modName);
@@ -44,14 +44,12 @@ async function appendImportContent(glob: string | string[]): Promise<string> {
 }
 
 /**
- * 
- * @param url 
+ * @param pathname 
  * @returns {Error|string} If valid, returns dirname
  */
-function validatePath(url: URL): Error | string {
+function validatePath(pathname: string): Error | string {
     const invalidPathError = new Error("Invalid path");
 
-    const { pathname } = url;
     if (pathname === "/") {
         return new Error(pathname, { cause: invalidPathError });
     }

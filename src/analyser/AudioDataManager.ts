@@ -490,107 +490,96 @@ export default class AudioDataManager {
     }
 
     /**
-     * Similar to the searchProcess method, but takes an input array of samples to find a pattern for in the body.
+     * Similar to the searchProcess method, but takes an input array of sample values to find a pattern for in the body.
      * 
      * When checking matches, RESERVED_BODY_VALUES automatically skipped. Example:
      * 
      * Input samples: [0.3, 0.6, 0.9]; Body: [(flag), 0.3, 0.6, (flag), 0.9, -0.5]; Valid match ✅
-     * @param samples 
+     * @param input Input samples to search for within the body
      * @param matchCount Number of matching patterns to return from the body
      */
-    public searchSamples(samples: Float32Array, matchCount: number = 1): number[] {
+    public searchSamples(input: Float32Array, matchCount: number = 1): number[] {
+        // NOTE: this method iterates backwards from processHeadIndex because it is where the latest samples have been written, and
+        // it's more logical to start searching from there, rather than an arbitrary index, like 0. The matches are initially in
+        // reverse order (most recently -> least recently written), and later reversed to be chronologically ordered.
+
         // TODO: implement this method, which is primarily made for verifying that getSamples() works
         const { arr } = this;
-        const { processSpacerEnd } = AudioDataManager.RESERVED_BODY_VALUES;
-        const rsbvSet = new Set(Object.values(AudioDataManager.RESERVED_BODY_VALUES));
         const matches: number[] = [];
         let index = this.findNextProcess(this.getHeader("processHeadIndex").processHeadIndex, -1);
-        const firstIndex = index;
-        let iterations = 0;
+        const startIndex = index;
+        let end = false;
         
-        // For testing
-        const indices: string[] = [];
-        
-        while(matches.length < matchCount && (index !== firstIndex || iterations++ === 0)) {
-            const startI = index;
-            let fullMatch = true;
-            index = this.loopIndex(index+2); // Skips over processSpacerStart and the sampleFrameLength
+        /* Loop for finding multiple matches in body or ensuring no repeated iteration over old indices */
+        while(matches.length < matchCount && !end) {
 
-            for (let i=0; i<samples.length; i++) {
-                let bodyVal: number;
+            /* Iterate across the body's samples */
+            let matchStartIndex: number | undefined;
+            let sampleMatchCount = 0;
+            
+            for (const bodyIndex of this.sampleIndexIterator(index, -1)) {
+                if (matchStartIndex === undefined) matchStartIndex = bodyIndex;
+                index = bodyIndex;
 
-                while(rsbvSet.has(
-                    (bodyVal = Float32.normalizeValue(arr[index]))
-                )) {
-                    if (index === startI) {
-                        fullMatch = false;
-                        break;
-                    }
-
-                    // Must check for the end of the process, because the sampleFrameLength
-                    // of each new process must be manually skipped, as it's not a RESERVED_BODY_VALUE.
-                    const nextValue = Float32.normalizeValue(arr[this.loopIndex(index+1)]);
-                    if (nextValue === processSpacerEnd) {
-                        throw new Error("nigga what?");
-                        index = this.findNextProcess(index+1, 1);
-                        if (index === startI) {
-                            fullMatch = false;
-                            break;
-                        } else {
-                            index = this.loopIndex(index+2);
-                        }
-                    } else {
-                        index = this.loopIndex(index+1);
-                    }
+                /* Ensure loop hasn't iterated back to starting index */
+                if (index === startIndex) {
+                    end = true;
+                    break;
                 }
+
+                /* Compare sample values */
+                const bodyVal = Float32.normalizeValue(arr[bodyIndex]);
                 
-                if (!fullMatch || index === startI) {
-                    fullMatch = false;
-                    break;
+                // Because the body is being iterated backwards starting from processHeadIndex, the input samples
+                // are also checked in reverse order so that they match the order from the body.
+                const inputVal = Float32.normalizeValue(input[input.length-sampleMatchCount-1]);
+
+                if (bodyVal === inputVal) {
+                    sampleMatchCount++;
+                } else {
+                    sampleMatchCount = 0;
                 }
 
-                const sampleVal = Float32.normalizeValue(samples[i]);
-                if (bodyVal !== sampleVal) {
-                    fullMatch = false;
-                    break;
+                /* Check if enough matching sample values have been found */
+                if (sampleMatchCount === input.length) {
+                    matches.push(matchStartIndex);
                 }
-
-                index = this.loopIndex(index+1);
             }
-
-            if (fullMatch) {
-                matches.push(startI);
-            }
-
-            // TODO: find out why index is only 2 greater than startI
-            indices.push(`${startI} - ${index}`);
-            index = this.findNextProcess(startI-1, -1);
         }
-        console.log("iterations: " + iterations);
-        console.log("indices: ");
-        console.log(indices);
-
-        return matches;
+        
+        return matches.reverse();
     }
 
-    *iterateSamples(index: number, direction: -1 | 1) {
-        // TODO: finish creating this method. It will be used by searchSamples() to only iterate only over audio sample values.
-        // In the future, may want to replace this with an iterator instead of generator for performance (testing needed first)
+    /**
+     * Iterates over only audio sample values, and returns their index values. Returns after iterating back to the index parameter
+     * @param index Starting iteration index
+     * @param direction Direction to iterate through the body (-1 = backward, 1 = forward)
+     */
+    public *sampleIndexIterator(index: number, direction: -1 | 1) {
+        // NOTE: In the future, may want to replace this with an iterator instead of generator for performance (testing needed first)
         const rsbvs = AudioDataManager.RESERVED_BODY_VALUES;
-        const { processSpacerStart, processSpacerEnd, inputSpacer } = rsbvs;
+        const rsbvSet = new Set(Object.values(rsbvs));
+        const { processSpacerStart } = rsbvs;
+        const { arr } = this;
+        const startI = index;
+        let firstIteration = true;
 
         while(true) {
-            index = this.findNextProcess(index, direction);
-            const startI = index;
+            const value = Float32.normalizeValue(arr[index]);
+            const prev = arr[this.loopIndex(index-1)];
 
-            let value;
+            if (!firstIteration && index === startI) break;
 
-            // TODO: if no data is in body (no reserved body values at all), throw an error
-            if (false) {
+            if (rsbvSet.has(value) || prev === processSpacerStart) {
+                index = this.loopIndex(index + direction);
+                firstIteration = false;
                 continue;
             }
 
-            yield { index, value };
+            yield index;
+
+            index = this.loopIndex(index + direction);
+            firstIteration = false;
         }
     }
 
@@ -699,7 +688,7 @@ export default class AudioDataManager {
         const { byteOffset, Wrapper } = AudioDataManager.HEADER_LAYOUT[key];
         const wrapped = new Wrapper(0);
         const methodName = `${action}${AudioDataManager.getViewMethodName(AudioDataManager.HEADER_LAYOUT[key].Wrapper)}` as keyof typeof this.view;
-        let method = (this.view[methodName] as DataViewSetter | DataViewGetter).bind(this.view);
+        let method = (this.view[methodName] as Function).bind(this.view) as DataViewSetter | DataViewGetter;
 
         const methodNameStr = String(methodName);
         if (methodNameStr.startsWith("set") && value !== undefined) {

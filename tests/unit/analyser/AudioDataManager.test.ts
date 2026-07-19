@@ -158,7 +158,7 @@ const testSampleGetter: TestFunction = function(context) {
     const foundPatterns = cMan.searchSamples(cManSamples.slice(0, sampleFrameLength), 1);
     console.log(`searchSamples patterns:`, foundPatterns);
     expect(foundPatterns.length).greaterThan(0);
-    throw new Error("bruh moment");
+    // throw new Error("bruh moment");
 
     let sampleCounter = 0;
     for (let i=0; sampleCounter<sampleCount; i++) {
@@ -187,11 +187,12 @@ const testSampleGetter: TestFunction = function(context) {
             expect(
                 Float32.normalizeValue(sample)
             ).toBe(
-                Float32.normalizeValue(cManSamples[sampleCounter++])
+                Float32.normalizeValue(cManSamples[sampleCounter])
             );
-            throw new Error("brehhh");
+            sampleCounter++;
+            // throw new Error("brehhh");
         }
-        throw new Error("nice cock");
+        // throw new Error("nice cock");
     }
 }
 
