@@ -284,9 +284,6 @@ export default class AudioDataManager {
 
         // NOTE: it may be wise to accomodate for processes that have been overwritten in the body
         // since a spacer may end up being found in an unexpected place.
-        
-        // Testing variable
-        // let iterations = 0;
 
         // Iterate over the body's processes
         startIndex = this.findNextProcess(startIndex, searchDirection);
@@ -321,8 +318,6 @@ export default class AudioDataManager {
                 }
             }
 
-            // TODO: fix issues of values being incorrect
-
             /**
              * This is meant for preventing too many samples from being set onto samples by removing excess samples from a half, starting from the end of the half
              * @param h 
@@ -353,9 +348,7 @@ export default class AudioDataManager {
 
             samples.set(h1, offset);
             index = this.findNextProcess(processStartIndex+searchDirection, searchDirection);
-
-            // For testing
-            // if (iterations++ > 1_000_000) throw new Error("Too much iteration...");
+            
         } while(index !== startIndex && totalSampleCount < sampleCount);
 
         return samples;
@@ -497,19 +490,20 @@ export default class AudioDataManager {
      * Input samples: [0.3, 0.6, 0.9]; Body: [(flag), 0.3, 0.6, (flag), 0.9, -0.5]; Valid match ✅
      * @param input Input samples to search for within the body
      * @param matchCount Number of matching patterns to return from the body
+     * @returns Starting indices of matching patterns within the body
      */
     public searchSamples(input: Float32Array, matchCount: number = 1): number[] {
         // NOTE: this method iterates backwards from processHeadIndex because it is where the latest samples have been written, and
         // it's more logical to start searching from there, rather than an arbitrary index, like 0. The matches are initially in
         // reverse order (most recently -> least recently written), and later reversed to be chronologically ordered.
-
-        // TODO: implement this method, which is primarily made for verifying that getSamples() works
         const { arr } = this;
         const matches: number[] = [];
         let index = this.findNextProcess(this.getHeader("processHeadIndex").processHeadIndex, -1);
         const startIndex = index;
         let end = false;
         
+        // TODO: fix bug where when matchCount is higher than available matches in body,
+        // extra or invalid indices are returned for each extra matchCount value.
         /* Loop for finding multiple matches in body or ensuring no repeated iteration over old indices */
         while(matches.length < matchCount && !end) {
 
@@ -528,7 +522,7 @@ export default class AudioDataManager {
                 }
 
                 /* Compare sample values */
-                const bodyVal = Float32.normalizeValue(arr[bodyIndex]);
+                const bodyVal = Float32.normalizeValue(arr[index]);
                 
                 // Because the body is being iterated backwards starting from processHeadIndex, the input samples
                 // are also checked in reverse order so that they match the order from the body.
@@ -556,17 +550,22 @@ export default class AudioDataManager {
      * @param direction Direction to iterate through the body (-1 = backward, 1 = forward)
      */
     public *sampleIndexIterator(index: number, direction: -1 | 1) {
+        // TODO: fix errors where an index is input where there isn't a process. This will lead to the iterator thinking
+        // that there are sample values there because the values should be 0.
+        // Handling for partly overwritten processes should also be handled, but this will only show up
+        // when enough are written so that the processes wrap around the body.
         // NOTE: In the future, may want to replace this with an iterator instead of generator for performance (testing needed first)
         const rsbvs = AudioDataManager.RESERVED_BODY_VALUES;
-        const rsbvSet = new Set(Object.values(rsbvs));
-        const { processSpacerStart } = rsbvs;
+        const rsbvSet = new Set(Object.values(rsbvs).map(Float32.normalizeValue));
+        const processSpacerStart = Float32.normalizeValue(rsbvs.processSpacerStart);
         const { arr } = this;
+        index = this.loopIndex(index);
         const startI = index;
         let firstIteration = true;
 
         while(true) {
             const value = Float32.normalizeValue(arr[index]);
-            const prev = arr[this.loopIndex(index-1)];
+            const prev = Float32.normalizeValue(arr[this.loopIndex(index-1)]);
 
             if (!firstIteration && index === startI) break;
 
@@ -626,7 +625,7 @@ export default class AudioDataManager {
     }
 
     /**
-     * If the end of the body array is exceeded, index loops back to beginning of body. Otherwise returns inputted index. Negative byte offsets wrap back to the end of the body.
+     * If the end of the body array is exceeded, index loops back to beginning of body. Otherwise returns inputted index. Negative indices wrap back to the end of the body.
      * @param index 
      * @returns 
      */

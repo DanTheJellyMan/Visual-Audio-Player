@@ -139,9 +139,9 @@ const testSampleGetter: TestFunction = function(context) {
     const cManSamples = cMan.getSamples(inputIndex, channelIndex, sampleCount);
 
     // For testing
-    let temp1 = processes[0][inputIndex][channelIndex];
+    let temp1 = processes[processes.length-1][inputIndex][channelIndex];
     temp1 = temp1.slice(temp1.length-cManSamples.length).map(Float32.normalizeValue);
-    let temp2 = cManSamples.slice(0, temp1.length).map(Float32.normalizeValue);
+    let temp2 = cManSamples.slice(cManSamples.length - temp1.length).map(Float32.normalizeValue);
     const equalTemps = !temp1.some((num, i) => num !== temp2[i]);
     if (!equalTemps) {
         console.log("og", temp1);
@@ -149,48 +149,82 @@ const testSampleGetter: TestFunction = function(context) {
     }
     console.log("sample equality?", equalTemps, `(${temp1.length}, ${temp2.length})`);
 
-    // For testing
-    // const cManSamplesToPrint = cManSamples.slice(cManSamples.length-printSampleCount);
-    // console.log(`Original samples: [\n\t${tempTestSamples.slice(tempTestSamples.length - cManSamplesToPrint.length).join(", --\n\t")} --\n]`);
-    // console.log(`getSamples(): [\n\t${cManSamplesToPrint.join(",\n\t")}\n]`);
+    const arrayIndexOf = function<T>(array: T[], items: T[]): number {
+        let i = -1;
+
+        arrayLoop: while(i < array.length-1) {
+            i++;
+
+            for (const item of items) {
+                if (i < array.length && array[i] !== item) continue arrayLoop;
+                i++;
+            }
+
+            return i - items.length;
+        }
+
+        return NaN;
+    };
+    /* For testing */
+    {
+        const cManSamplesToPrint = cManSamples.slice(cManSamples.length - printSampleCount);
+        console.log(`tempTestSamples (${tempTestSamples.length}) vs. cManSamples (${cManSamples.length})`)
+        console.log(
+            `Original samples [${arrayIndexOf(tempTestSamples, Array.from(cManSamplesToPrint))} / ${tempTestSamples.length}]: `+
+            `[\n\t${tempTestSamples.slice(tempTestSamples.length - cManSamplesToPrint.length).join(", --\n\t")} --\n]`
+        );
+        console.log(`getSamples(): [\n\t${cManSamplesToPrint.join(",\n\t")}\n]`);
+    }
     
     // Verify that the pattern of samples can be found within the body
     const foundPatterns = cMan.searchSamples(cManSamples.slice(0, sampleFrameLength), 1);
     console.log(`searchSamples patterns:`, foundPatterns);
     expect(foundPatterns.length).greaterThan(0);
-    // throw new Error("bruh moment");
 
-    let sampleCounter = 0;
-    for (let i=0; sampleCounter<sampleCount; i++) {
+    // TODO: sometimes the test runs forever, and sometimes it successfully passes. Fix this issue so it consistently passes
+    let sampleIndex = sampleCount-1;
+    for (let i=processes.length-1; sampleIndex >= 0 && i >= 0; i--) {
         const channel = processes[i][inputIndex][channelIndex];
-        for (let j=0; j<channel.length; j++) {
-            /* For testing */
-            (function(){
-                const pRange = 8;
-                const inputSlice = channel.slice(
-                    Math.max(0, j - Math.round(pRange/2)),
-                    j + Math.ceil(pRange/2)
-                ).map((float) => Float32.normalizeValue(float));
-                const outputSlice = cManSamples.slice(
-                    Math.max(0, sampleCounter - Math.round(pRange/2)),
-                    sampleCounter + Math.ceil(pRange/2)
-                ).map((float) => Float32.normalizeValue(float));
-                console.log(stringifyArrays(
-                    ["Input:", "Output:"],
-                    [inputSlice, outputSlice],
-                    false
-                ));
-            })();
-            /* --- */
+        
+        /* For testing */
+        {
+            const pRange = 8;
+            const inputSlice = channel.slice(
+                channel.length - pRange,
+                // Math.max(0, j - Math.round(pRange/2)),
+                // j + Math.ceil(pRange/2)
+            ).map((float) => Float32.normalizeValue(float));
+            const outputSlice = cManSamples.slice(
+                cManSamples.length - inputSlice.length
+                // Math.max(0, sampleCounter - Math.round(pRange/2)),
+                // sampleCounter + Math.ceil(pRange/2)
+            ).map((float) => Float32.normalizeValue(float));
+            console.log(stringifyArrays(
+                ["Input:", "Output:"],
+                [inputSlice, outputSlice],
+                true
+            ));
+        };
+        console.log(
+            `process: ${i} / ${processes.length-1}, `+
+            `input: ${inputIndex} / ${processes[i].length-1}, `+
+            `channel: ${channelIndex} / ${processes[i][inputIndex].length-1}`
+        );
 
+        for (let j=channel.length-1; j>=0; j--) {
             const sample = channel[j];
+            // console.log(`${j} -> 0`);
+            // console.log(`index of sample: ${cManSamples.indexOf(sample)}`);
+            // console.log("sample index: " + sampleIndex);
             expect(
                 Float32.normalizeValue(sample)
-            ).toBe(
-                Float32.normalizeValue(cManSamples[sampleCounter])
+            ).toBeCloseTo(
+                Float32.normalizeValue(cManSamples[sampleIndex]),
+                10
             );
-            sampleCounter++;
+            sampleIndex--;
             // throw new Error("brehhh");
+            if (sampleIndex < 0) break;
         }
         // throw new Error("nice cock");
     }
