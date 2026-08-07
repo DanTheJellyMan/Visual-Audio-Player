@@ -8,10 +8,6 @@ export const RenderEngineWorker = await import("./render-engine/worker");
 
 export const Utils = await importUtils();
 
-/**
- * @param pathname 
- * @returns 
- */
 async function importUtils() {
     const files = Object.entries(import.meta.glob("./utils/*.ts"));
     const imports: Record<typeof files[number][0], Awaited<ReturnType<typeof files[number][1]>>> = {};
