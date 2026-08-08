@@ -40,4 +40,8 @@ async function main() {
     });
 
     const manager = new AudioDataManager(sab!);
+
+    setInterval(() => {
+        
+    }, 1000/10);
 }

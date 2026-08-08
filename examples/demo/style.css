@@ -15,6 +15,7 @@ body {
     display: flex;
     flex-direction: column;
     align-items: center;
+    gap: 1rem;
 
     margin: 5rem 0;
     padding-bottom: 5rem;
@@ -40,12 +41,17 @@ input[type="file"] {
     border-radius: 10px;
 }
 
+audio#music {
+    min-height: 2rem;
+}
+
 canvas {
-    height: 720px;
-    aspect-ratio: 16/9;
-    border: 6px solid black;
-    --border-radius: clamp(5rem, 4vw, 15rem);
-    border-radius: var(--border-radius) var(--border-radius) 0 0;
+    height: 400px;
+    aspect-ratio: 1 / 1;
+
+    background-color: black;
+    border: 2px dashed hsla(260, 25%, 37.5%, 0.75);
+    border-radius: 4px;
 }
 
 #fps-counter {

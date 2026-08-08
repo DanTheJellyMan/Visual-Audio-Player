@@ -48,7 +48,11 @@ function handleMessage(e: MessageEvent<MessagePayload>): void {
             }
             
             const bitmap = (ctx.canvas as OffscreenCanvas).transferToImageBitmap();
-            self.postMessage(bitmap, [bitmap]);
+            const messagePayload: MessagePayload = {
+                type: "get-bitmap",
+                data: bitmap
+            };
+            self.postMessage(messagePayload, [bitmap]);
         }
     }
 }

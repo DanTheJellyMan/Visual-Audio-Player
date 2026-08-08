@@ -5,7 +5,7 @@ import { defineConfig } from "vite";
 export default defineConfig({
     build: {
         lib: {
-            name: "PhonoFrame",
+            name: "Visual-Audio-Player",
             entry: "src",
             formats: ["es"]
         }
