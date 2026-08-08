@@ -1,5 +1,5 @@
-import loadShaders from "../utils/loadShaders";
 import AudioDataManager, { Process, ProcessInfo } from "../analyser/AudioDataManager";
+import renderShaderCode from "./render-shader.wgsl?raw";
 
 export const adapter = (await navigator.gpu.requestAdapter())!;
 if (!adapter) throw new Error("Failed to retrieve GPU Adapter");
@@ -31,7 +31,7 @@ export function init(buf: SharedArrayBuffer, canvas: OffscreenCanvas): void {
 
 async function main() {
     const shaderModule = device.createShaderModule({
-        code: await loadShaders("./render-shader-modules")
+        code: renderShaderCode
     });
     
     const vertBuf = device.createBuffer({

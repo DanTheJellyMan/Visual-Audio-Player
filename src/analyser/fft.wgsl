@@ -69,3 +69,14 @@ fn compute_dft(n: u32, N: u32, inverse: bool) -> ComplexPair {
     let divisor: f32 = select(1.0, f32(N), inverse);
     return ComplexPair(real / divisor, imag / divisor);
 }
+
+// TODO: compute magnitude with Pythagorean theorum
+// magnitude^2 = real^2 + imag^2
+// normalized = magnitude * 2 / fftSize
+// clamped = max(1e-6, normalized)
+// db = 20 * log10(clamped)
+
+// Logarithm base-change identity:
+// fn log10(x) -> f32 {
+//   return log2(x) / log2(10);
+// }

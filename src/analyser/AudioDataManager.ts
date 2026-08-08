@@ -554,7 +554,6 @@ export default class AudioDataManager {
         // that there are sample values there because the values should be 0.
         // Handling for partly overwritten processes should also be handled, but this will only show up
         // when enough are written so that the processes wrap around the body.
-        // NOTE: In the future, may want to replace this with an iterator instead of generator for performance (testing needed first)
         const rsbvs = AudioDataManager.RESERVED_BODY_VALUES;
         const rsbvSet = new Set(Object.values(rsbvs).map(Float32.normalizeValue));
         const processSpacerStart = Float32.normalizeValue(rsbvs.processSpacerStart);
