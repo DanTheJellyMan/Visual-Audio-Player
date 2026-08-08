@@ -22,6 +22,17 @@ body {
     background-color: hsl(250,30%,25%);
 }
 
+label[for='db-audio-toggle'] {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 0.5rem;
+
+    margin: 1rem;
+
+    color: cyan;
+}
+
 input[type="file"] {
     padding: 12px 6px;
 

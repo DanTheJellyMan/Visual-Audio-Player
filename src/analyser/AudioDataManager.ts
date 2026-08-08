@@ -98,10 +98,10 @@ export default class AudioDataManager {
      */
     private static createRSBVEnum<T extends string[]>(...values: T): Readonly<Record<T[number], number>> {
         const customEnum = {} as Record<T[number], number>;
-        let nextValue = new Float32(2.0);
+        let nextValue = new Float32(2);
         for (const name of values) {
             customEnum[name as T[number]] = nextValue.value;
-            nextValue.value += 1.0;
+            nextValue.value += Float32.normalizeValue(1);
         }
         return Object.freeze(customEnum);
     }
@@ -235,9 +235,9 @@ export default class AudioDataManager {
         const { arr } = this;
         const inputs: Process = [];
 
-        index = this.loopIndex(this.findNextProcess(index, searchDirection)+searchDirection);
+        index = this.loopIndex(this.findNextProcess(index, searchDirection) + 1);
         const sampleFrameLength = arr[index];
-        index = this.loopIndex(index+1);
+        index = this.loopIndex(index + 1);
         const curr = new Float32(arr[index]);
 
         // NOTE: it may be wise to accomodate for processes that have been overwritten in the body
@@ -606,6 +606,7 @@ export default class AudioDataManager {
     public findNextProcess(index: number, searchDirection: -1 | 1 = 1): number {
         const { processSpacerStart } = AudioDataManager["RESERVED_BODY_VALUES"];
         const { arr } = this;
+        index = this.loopIndex(index);
 
         const isProcessStartOffset = (): boolean => {
             const i = this.loopIndex(index);

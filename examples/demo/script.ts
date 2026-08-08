@@ -4,6 +4,14 @@ import AdvancedAnalyserNode from "../../src/analyser/AdvancedAnalyserNode";
 const workerUrl = new URL("../../src/render-engine/worker.ts", import.meta.url);
 const worker = new Worker(workerUrl, { type: "module" });
 
+const dbAudioToggleEl: HTMLInputElement = document.querySelector("input[type='checkbox']#db-audio-toggle")!;
+const dbAudioStorageEnabled = (function(){
+    const v = localStorage.getItem("allowDbAudioStorage");
+    if (v === null) return false;
+    return Boolean(Number(v));
+})();
+dbAudioToggleEl.checked = dbAudioStorageEnabled;
+
 const audioInput: HTMLInputElement = document.querySelector("#audio-input")!;
 const audio = document.querySelector("#music")! as HTMLAudioElement;
 const audioContext = new AudioContext();
@@ -17,11 +25,18 @@ sourceNode
 
 await audioContext.suspend();
 
+dbAudioToggleEl.addEventListener("change", (e) => {
+    localStorage.setItem("allowDbAudioStorage", Number(dbAudioToggleEl.checked).toString());
+});
+
 audio.addEventListener("play", handleAudioPlay);
 audio.addEventListener("pause", handleAudioPause);
 audioInput.addEventListener("input", handleAudioInput);
 
-const dbInitPromise: Promise<void> = new Promise((resolve, reject) => {
+const dbInitPromise: Promise<void> = new Promise((resolve) => {
+    if (dbAudioStorageEnabled === false) {
+        return resolve();
+    }
     const dbOpenRequest = indexedDB.open("AudioSource");
     dbOpenRequest.onupgradeneeded = (e) => {
         const db = dbOpenRequest.result;
@@ -66,10 +81,11 @@ async function handleAudioPlay(e: Event) {
 async function handleAudioPause(e: Event) {
     await audioContext.suspend();
     const { processHeadIndex } = manager.getHeader("processHeadIndex");
-    console.log(manager.readProcess(processHeadIndex, -1));
 }
 async function handleAudioInput(e: Event) {
+    console.log("awaiting...");
     await dbInitPromise;
+    console.log("done awaiting!");
     const target: HTMLInputElement = e.target! as HTMLInputElement;
     if (!target.files || target.files.length !== 1) return;
 
