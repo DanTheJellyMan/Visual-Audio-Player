@@ -32,10 +32,12 @@ const initMessagePayload: WorkerMessagePayload = {
         canvas: offCanv
     }
 };
-worker.postMessage(initMessagePayload, [offCanv]);
-
-const manager = new AudioDataManager(analyser.sab);
-manager.initHeader(audioContext.sampleRate, 5);
+worker.addEventListener("message", (e) => {
+    if (e.data !== "Ready") {
+        throw new Error(e.data);
+    }
+    worker.postMessage(initMessagePayload, [offCanv]);
+}, { once: true });
 
 dbAudioToggleEl.addEventListener("change", (e) => {
     localStorage.setItem("allowDbAudioStorage", Number(dbAudioToggleEl.checked).toString());

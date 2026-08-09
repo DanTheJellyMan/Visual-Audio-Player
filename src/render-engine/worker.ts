@@ -25,6 +25,7 @@ export type MessagePayload =
 let config: Config | null = null;
 
 self.onmessage = handleMessage;
+self.postMessage("Ready");
 
 function handleMessage(e: MessageEvent<MessagePayload>): void {
     const { type, data } = e.data;

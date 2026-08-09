@@ -1,5 +1,5 @@
 struct ComplexPair {
-    real: f32
+    real: f32,
     imag: f32
 }
 
@@ -7,9 +7,8 @@ const PI: f32 = 245850922.0 / 78256779.0;
 
 @group(0) @binding(0)
 var<storage, read> audio_samples: array<f32>;
-
 @group(0) @binding(1)
-var<storage, write> complex_samples: array<ComplexPair>;
+var<storage, read_write> complex_samples: array<ComplexPair>;
 
 @compute @workgroup_size(64)
 fn preprocess_samples(
@@ -24,11 +23,12 @@ fn preprocess_samples(
     complex_samples[i] = ComplexPair(audio_samples[i], 0.0);
 }
 
-@group(1) @binding(0)
+@group(0) @binding(0)
 var<storage, read> dft_input: array<ComplexPair>;
+@group(0) @binding(1)
+var<storage, read_write> dft_output: array<ComplexPair>;
 
-@group(1) @binding(1)
-var<storage, write> dft_output: array<ComplexPair>;
+// TODO: create proper FFT functions instead of DFT, which is much slower
 
 @compute @workgroup_size(64)
 fn dft(
@@ -70,13 +70,33 @@ fn compute_dft(n: u32, N: u32, inverse: bool) -> ComplexPair {
     return ComplexPair(real / divisor, imag / divisor);
 }
 
-// TODO: compute magnitude with Pythagorean theorum
-// magnitude^2 = real^2 + imag^2
-// normalized = magnitude * 2 / fftSize
-// clamped = max(1e-6, normalized)
-// db = 20 * log10(clamped)
+@group(0) @binding(0)
+var<uniform> fft_size: u32;
+@group(0) @binding(1)
+var<storage, read> mag_input: array<ComplexPair>;
+@group(0) @binding(2)
+var<storage, read_write> mag_output: array<f32>; // NOTE: may want to make this read_write
 
-// Logarithm base-change identity:
-// fn log10(x) -> f32 {
-//   return log2(x) / log2(10);
-// }
+@compute @workgroup_size(64)
+fn magnitude(
+    @builtin(global_invocation_id) gid: vec3u
+) {
+    let i = gid.x;
+    let len = arrayLength(&mag_input);
+    if (i >= len) {
+        return;
+    }
+
+    let real = mag_input[i].real;
+    let imag = mag_input[i].imag;
+    let mag = sqrt(pow(real, 2.0) + pow(imag, 2.0)); // Pythagorean theorem
+    var norm = mag * 2.0 / f32(fft_size);
+    let db = 20.0 * log10(max(norm, 1e-6));
+
+    mag_output[i] = db;
+}
+
+fn log10(x: f32) -> f32 {
+    // Logarithm base-change identity
+    return log2(x) / log2(10.0);
+}

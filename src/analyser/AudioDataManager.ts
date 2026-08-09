@@ -273,13 +273,15 @@ export default class AudioDataManager {
         return inputs;
     }
 
-    public getSamples(inputIndex: number, channelIndex: number, sampleCount: number, startIndex = this.getHeader("processHeadIndex").processHeadIndex-1, searchDirection: -1 | 1 = -1): Float32Array {
+    public getSamples(inputIndex: number, channelIndex: number, sampleCount: number, startIndex = this.getHeader("processHeadIndex").processHeadIndex-1, searchDirection: -1 | 1 = -1, dstArr = new Float32Array(sampleCount)): Float32Array {
         const paramInfo = `inputIndex: ${inputIndex}, channelIndex: ${channelIndex}, sampleCount: ${sampleCount}`;
         const INP_OOB_ERR = new Error(`Input index out of bounds - ${paramInfo}`);
         const CH_OOB_ERR = new Error(`Channel index out of bounds - ${paramInfo}`);
         const { processSpacerStart, processSpacerEnd, inputSpacer } = AudioDataManager.RESERVED_BODY_VALUES;
         const { arr } = this;
-        const samples = new Float32Array(sampleCount);
+        if (!dstArr || dstArr.length !== sampleCount) {
+            dstArr = new Float32Array(sampleCount);
+        }
         let totalSampleCount = 0;
 
         // NOTE: it may be wise to accomodate for processes that have been overwritten in the body
@@ -338,7 +340,7 @@ export default class AudioDataManager {
                 offset = sampleCount - totalSampleCount - h2.length;
                 // console.log("samples offset (h2): " + offset);
                 totalSampleCount += h2.length;
-                samples.set(h2, offset);
+                dstArr.set(h2, offset);
             }
 
             const h1 = sliceSubarray(halves[0]);
@@ -346,12 +348,12 @@ export default class AudioDataManager {
             // console.log("samples offset (h1): " + offset);
             totalSampleCount += h1.length;
 
-            samples.set(h1, offset);
+            dstArr.set(h1, offset);
             index = this.findNextProcess(processStartIndex+searchDirection, searchDirection);
             
         } while(index !== startIndex && totalSampleCount < sampleCount);
 
-        return samples;
+        return dstArr;
     }
 
     /**
