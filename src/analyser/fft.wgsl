@@ -75,7 +75,7 @@ var<uniform> fft_size: u32;
 @group(0) @binding(1)
 var<storage, read> mag_input: array<ComplexPair>;
 @group(0) @binding(2)
-var<storage, read_write> mag_output: array<f32>; // NOTE: may want to make this read_write
+var<storage, read_write> mag_output: array<f32>;
 
 @compute @workgroup_size(64)
 fn magnitude(

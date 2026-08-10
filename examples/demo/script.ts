@@ -24,9 +24,8 @@ await audioContext.suspend();
 
 const workerUrl = new URL("../../src/render-engine/worker.ts", import.meta.url);
 const worker = new Worker(workerUrl, { type: "module" });
-const canvasElRect = canvasEl.getBoundingClientRect();
-canvasEl.width = canvasElRect.width * 2;
-canvasEl.height = canvasElRect.height * 2;
+canvasEl.width = screen.width * window.devicePixelRatio;
+canvasEl.height = screen.height * window.devicePixelRatio;
 const offCanv = canvasEl.transferControlToOffscreen();
 const initMessagePayload: WorkerMessagePayload = {
     type: "init",
@@ -49,11 +48,9 @@ audio.addEventListener("play", handleAudioPlay);
 audio.addEventListener("pause", handleAudioPause);
 audio.addEventListener("timeupdate", handleTimeupdate);
 audioInput.addEventListener("input", handleAudioInput);
+canvasEl.addEventListener("dblclick", () => canvasEl.requestFullscreen());
 
 const dbInitPromise: Promise<void> = new Promise((resolve) => {
-    if (dbAudioStorageEnabled === false) {
-        return resolve();
-    }
     const dbOpenRequest = indexedDB.open("AudioSource");
     dbOpenRequest.onupgradeneeded = (e) => {
         const db = dbOpenRequest.result;
@@ -80,7 +77,7 @@ const dbInitPromise: Promise<void> = new Promise((resolve) => {
         };
         getRequest.onsuccess = (e) => {
             const file: File | undefined = getRequest.result;
-            if (file !== undefined) {
+            if (dbAudioStorageEnabled && file !== undefined) {
                 const dataTransfer = new DataTransfer();
                 dataTransfer.items.add(file);
                 audioInput.files = dataTransfer.files;
@@ -112,6 +109,7 @@ async function handleAudioInput(e: Event) {
         await audio.play();
         console.log("Auto play from DB load");
     }
+    if (!dbAudioStorageEnabled) return;
 
     indexedDB.open("AudioSource")
     .onsuccess = (e) => {

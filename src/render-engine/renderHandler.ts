@@ -39,7 +39,9 @@ async function main() {
         console.info("shader module compilation info:", ...infos);
     });
 
-    const fftSize = 2 ** AudioDataManager.FFT_RATIO_MAX.value;
+    const manager = new AudioDataManager(sab!);
+    const fftSize = 2 ** 9
+        // 2 ** manager.getHeader("fftRatio").fftRatio;
     const audioSampleBuf = device.createBuffer({
         size: fftSize * 4,
         usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
@@ -266,7 +268,6 @@ async function main() {
         })
     });
 
-    const manager = new AudioDataManager(sab!);
     const samples = new Float32Array(fftSize);
 
     setInterval(async () => {
@@ -316,7 +317,7 @@ async function main() {
         renderPass.setPipeline(renderPipeline);
         renderPass.setBindGroup(0, renderSamplesGroup);
         renderPass.setVertexBuffer(0, magBuf);
-        renderPass.draw(fftSize * 6);
+        renderPass.draw((fftSize/2+1)*6);
         renderPass.end();
 
         // commandEncoder.copyBufferToBuffer(magBuf, testBuf);
@@ -328,5 +329,5 @@ async function main() {
         // console.log(new Float32Array(abCpy).toString());
 
         // console.log(`Render time: ${performance.now()-startT}ms`);
-    }, 1000 / 10);
+    }, 1000 / 60);
 }

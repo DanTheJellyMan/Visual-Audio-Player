@@ -46,8 +46,8 @@ audio#music {
 }
 
 canvas {
-    height: 400px;
-    aspect-ratio: 1 / 1;
+    height: 60%;
+    aspect-ratio: 16 / 9;
 
     background-color: black;
     border: 2px dashed hsla(260, 25%, 37.5%, 0.75);
