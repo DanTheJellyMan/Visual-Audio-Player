@@ -39,7 +39,7 @@ async function main() {
         console.info("shader module compilation info:", ...infos);
     });
 
-    const fftSize = 2 ** AudioDataManager.FFT_RATIO_MIN.value;
+    const fftSize = 2 ** AudioDataManager.FFT_RATIO_MAX.value;
     const audioSampleBuf = device.createBuffer({
         size: fftSize * 4,
         usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
@@ -62,7 +62,7 @@ async function main() {
     });
     const magBuf = device.createBuffer({
         size: fftBuf.size / 2,
-        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC | GPUBufferUsage.VERTEX,
         label: "magnitude"
     });
     const testBuf = device.createBuffer({
@@ -132,6 +132,17 @@ async function main() {
             }
         ]
     });
+    const renderSamplesLayout = device.createBindGroupLayout({
+        entries: [
+            {
+                binding: 0,
+                visibility: GPUShaderStage.VERTEX,
+                buffer: {
+                    type: "read-only-storage"
+                }
+            }
+        ]
+    });
 
     const preprocessSamplesGroup = device.createBindGroup({
         layout: preprocessSamplesLayout,
@@ -193,6 +204,17 @@ async function main() {
         ],
         label: "computeMagnitudeGroup"
     });
+    const renderSamplesGroup = device.createBindGroup({
+        layout: renderSamplesLayout,
+        entries: [
+            {
+                binding: 0,
+                resource: {
+                    buffer: magBuf
+                }
+            }
+        ]
+    });
 
     const preprocessSamplesPipeline = device.createComputePipeline({
         layout: device.createPipelineLayout({
@@ -221,6 +243,28 @@ async function main() {
             entryPoint: "magnitude"
         }
     });
+    const renderPipeline = device.createRenderPipeline({
+        vertex: {
+            module: renderShaderModule,
+            entryPoint: "vert_main",
+            buffers: []
+        },
+        fragment: {
+            module: renderShaderModule,
+            entryPoint: "frag_main",
+            targets: [
+                {
+                    format: navigator.gpu.getPreferredCanvasFormat()
+                }
+            ]
+        },
+        primitive: {
+            topology: "triangle-list"
+        },
+        layout: device.createPipelineLayout({
+            bindGroupLayouts: [renderSamplesLayout]
+        })
+    });
 
     const manager = new AudioDataManager(sab!);
     const samples = new Float32Array(fftSize);
@@ -229,7 +273,9 @@ async function main() {
         const startT = performance.now();
 
         const { processHeadIndex } = manager.getHeader("processHeadIndex");
-        manager.getSamples(0, 0, samples.length, processHeadIndex, -1, samples);
+        const manSamples = manager.getSamples(0, 0, samples.length, processHeadIndex, -1);
+        if (!samples.some((value, i) => value !== manSamples[i])) return;
+        samples.set(manSamples);
         device.queue.writeBuffer(audioSampleBuf, 0, samples, 0, samples.length);
         device.queue.writeBuffer(
             fftSizeUniformBuf, 0,
@@ -257,15 +303,30 @@ async function main() {
         magnitudePass.dispatchWorkgroups(wkgrpCt);
         magnitudePass.end();
 
-        commandEncoder.copyBufferToBuffer(magBuf, testBuf);
+        const renderPass = commandEncoder.beginRenderPass({
+            colorAttachments: [
+                {
+                    clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 1.0 },
+                    loadOp: "clear",
+                    storeOp: "store",
+                    view: ctx!.getCurrentTexture()
+                }
+            ]
+        });
+        renderPass.setPipeline(renderPipeline);
+        renderPass.setBindGroup(0, renderSamplesGroup);
+        renderPass.setVertexBuffer(0, magBuf);
+        renderPass.draw(fftSize * 6);
+        renderPass.end();
+
+        // commandEncoder.copyBufferToBuffer(magBuf, testBuf);
         device.queue.submit([commandEncoder.finish()]);
 
-        await testBuf.mapAsync(GPUMapMode.READ, 0, testBuf.size);
-        const abCpy = testBuf.getMappedRange(0, testBuf.size).slice();
-        testBuf.unmap();
+        // await testBuf.mapAsync(GPUMapMode.READ, 0, testBuf.size);
+        // const abCpy = testBuf.getMappedRange(0, testBuf.size).slice();
+        // testBuf.unmap();
+        // console.log(new Float32Array(abCpy).toString());
 
-        console.log("mapped copy of magnitude values:");
-        console.log(new Float32Array(abCpy).toString());
-        console.log(`Total render time: ${performance.now()-startT}ms`);
-    }, 1000 * 2);
+        // console.log(`Render time: ${performance.now()-startT}ms`);
+    }, 1000 / 10);
 }

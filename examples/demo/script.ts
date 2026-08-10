@@ -24,6 +24,9 @@ await audioContext.suspend();
 
 const workerUrl = new URL("../../src/render-engine/worker.ts", import.meta.url);
 const worker = new Worker(workerUrl, { type: "module" });
+const canvasElRect = canvasEl.getBoundingClientRect();
+canvasEl.width = canvasElRect.width * 2;
+canvasEl.height = canvasElRect.height * 2;
 const offCanv = canvasEl.transferControlToOffscreen();
 const initMessagePayload: WorkerMessagePayload = {
     type: "init",
