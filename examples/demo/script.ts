@@ -1,6 +1,7 @@
 import AudioDataManager from "../../src/analyser/AudioDataManager";
 import AdvancedAnalyserNode from "../../src/analyser/AdvancedAnalyserNode";
 import { InitData as WorkerInitData, MessagePayload as WorkerMessagePayload } from "../../src/render-engine/worker";
+import { randInt } from "../../src/utils/randomNumber";
 
 const dbAudioToggleEl: HTMLInputElement = document.querySelector("input[type='checkbox']#db-audio-toggle")!;
 const dbAudioStorageEnabled = (function(){
@@ -11,7 +12,6 @@ const dbAudioStorageEnabled = (function(){
 let playedInitiallyFromDbLoad = false;
 dbAudioToggleEl.checked = dbAudioStorageEnabled;
 
-const canvasEl: HTMLCanvasElement = document.querySelector("canvas#visualizer")!;
 const audioInput: HTMLInputElement = document.querySelector("#audio-input")!;
 const audio = document.querySelector("#music")! as HTMLAudioElement;
 const audioContext = new AudioContext();
@@ -22,23 +22,32 @@ sourceNode
 .connect(audioContext.destination);
 await audioContext.suspend();
 
-const workerUrl = new URL("../../src/render-engine/worker.ts", import.meta.url);
-const worker = new Worker(workerUrl, { type: "module" });
+const canvasEl: HTMLCanvasElement = document.querySelector("canvas#visualizer")!;
 canvasEl.width = screen.width * window.devicePixelRatio;
 canvasEl.height = screen.height * window.devicePixelRatio;
+canvasEl.style.aspectRatio = `${canvasEl.width} / ${canvasEl.height}`;
 const offCanv = canvasEl.transferControlToOffscreen();
-const initMessagePayload: WorkerMessagePayload = {
-    type: "init",
-    data: {
-        sab: analyser.sab,
-        canvas: offCanv
-    }
-};
+
+const workerUrl = new URL("../../src/render-engine/worker.ts", import.meta.url);
+const worker = new Worker(workerUrl, { type: "module" });
 worker.addEventListener("message", (e) => {
-    if (e.data !== "Ready") {
-        throw new Error(e.data);
-    }
+    if (e.data !== "Ready") throw new Error(e.data);
+    const initMessagePayload: WorkerMessagePayload = {
+        type: "init",
+        data: {
+            sab: analyser.sab,
+            canvas: offCanv
+        }
+    };
+    const configMessagePayload: WorkerMessagePayload = {
+        type: "config-update",
+        data: {
+            fftRatio: 12,
+            fps: Infinity
+        }
+    };
     worker.postMessage(initMessagePayload, [offCanv]);
+    worker.postMessage(configMessagePayload);
 }, { once: true });
 
 dbAudioToggleEl.addEventListener("change", (e) => {
@@ -106,6 +115,7 @@ async function handleAudioInput(e: Event) {
         playedInitiallyFromDbLoad = true;
         const currentTime = sessionStorage.getItem("audioCurrentTime");
         audio.currentTime = parseFloat(currentTime === null ? "0" : currentTime);
+        audio.volume = 0.25;
         await audio.play();
         console.log("Auto play from DB load");
     }

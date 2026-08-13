@@ -4,6 +4,8 @@ struct VertexOut {
 }
 
 @group(0) @binding(0)
+var<uniform> fft_size: u32;
+@group(0) @binding(1)
 var<storage, read> samples_db: array<f32>;
 
 @vertex
@@ -15,7 +17,9 @@ fn vert_main(
     // db: [-120, 0]
     let sample_index = vertex_index / 6u;
     let db = samples_db[sample_index];
-    let sample_count = arrayLength(&samples_db) / 2;
+    // let db = -60.0;
+    // let sample_count = arrayLength(&samples_db) / 2;
+    let sample_count = fft_size / 2;
     let width = 2.0 / f32(sample_count);
 
     let tri_v = vertex_index % 3u;

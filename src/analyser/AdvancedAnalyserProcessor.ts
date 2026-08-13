@@ -24,8 +24,6 @@ class AdvancedAnalyserProcessor extends AudioWorkletProcessor {
 
     private options: AudioWorkletNodeOptions;
     private manager: AudioDataManager | null = null;
-    // TODO: check if Config is necessary or if parameterDescriptors can be used instead
-    private config: Config | null = null;
 
     constructor(options: AudioWorkletNodeOptions) {
         super();
@@ -44,22 +42,15 @@ class AdvancedAnalyserProcessor extends AudioWorkletProcessor {
                 this.manager.initHeader(sampleRate, AudioDataManager["FFT_RATIO_MIN"].value);
                 break;
             }
-            case "config-update": {
-                const dict = this.config ? this.config : data;
-                strictObjectAssign(dict, data);
-                this.config = dict;
-                break;
-            }
         }
     }
 
     process(inputs: Process, outputs: Process, parameters: Record<string, Float32Array>): boolean {
-        const { manager, config } = this;
-        if (manager && config) {
+        const { manager } = this;
+        if (manager) {
             manager.setHeader({
                 currentFrame: BigInt(currentFrame),
-                currentTime,
-                fftRatio: config.fftRatio
+                currentTime
             });
 
             const result = manager.writeProcess(inputs);

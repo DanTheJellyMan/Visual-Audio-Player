@@ -6,8 +6,11 @@ struct ComplexPair {
 const PI: f32 = 245850922.0 / 78256779.0;
 
 @group(0) @binding(0)
-var<storage, read> audio_samples: array<f32>;
+var<uniform> fft_size: u32;
+
 @group(0) @binding(1)
+var<storage, read> audio_samples: array<f32>;
+@group(0) @binding(2)
 var<storage, read_write> complex_samples: array<ComplexPair>;
 
 @compute @workgroup_size(64)
@@ -15,7 +18,8 @@ fn preprocess_samples(
     @builtin(global_invocation_id) gid: vec3u
 ) {
     let i = gid.x;
-    let len = arrayLength(&audio_samples);
+    // let len = arrayLength(&audio_samples);
+    let len = fft_size;
     if (i >= len) {
         return;
     }
@@ -23,9 +27,9 @@ fn preprocess_samples(
     complex_samples[i] = ComplexPair(audio_samples[i], 0.0);
 }
 
-@group(0) @binding(0)
-var<storage, read> dft_input: array<ComplexPair>;
 @group(0) @binding(1)
+var<storage, read> dft_input: array<ComplexPair>;
+@group(0) @binding(2)
 var<storage, read_write> dft_output: array<ComplexPair>;
 
 // TODO: create proper FFT functions instead of DFT, which is much slower
@@ -35,7 +39,8 @@ fn dft(
     @builtin(global_invocation_id) gid: vec3u
 ) {
     let n = gid.x;
-    let N = arrayLength(&dft_input);
+    // let N = arrayLength(&dft_input);
+    let N = fft_size;
     if (n >= N) {
         return;
     }
@@ -47,7 +52,8 @@ fn idft(
     @builtin(global_invocation_id) gid: vec3u
 ) {
     let n = gid.x;
-    let N = arrayLength(&dft_input);
+    // let N = arrayLength(&dft_input);
+    let N = fft_size;
     if (n >= N) {
         return;
     }
@@ -70,8 +76,6 @@ fn compute_dft(n: u32, N: u32, inverse: bool) -> ComplexPair {
     return ComplexPair(real / divisor, imag / divisor);
 }
 
-@group(0) @binding(0)
-var<uniform> fft_size: u32;
 @group(0) @binding(1)
 var<storage, read> mag_input: array<ComplexPair>;
 @group(0) @binding(2)
@@ -82,7 +86,7 @@ fn magnitude(
     @builtin(global_invocation_id) gid: vec3u
 ) {
     let i = gid.x;
-    let len = arrayLength(&mag_input);
+    let len = fft_size;
     if (i >= len) {
         return;
     }
