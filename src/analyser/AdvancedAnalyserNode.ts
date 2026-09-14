@@ -17,14 +17,20 @@ export default class AdvancedAnalyserNode extends AudioWorkletNode {
     public readonly sab: SharedArrayBuffer;
 
     /**
-     * Not recommended calling constructor directly. Call the static async "create" method instead.
+     * Not recommended calling constructor directly.
+     * Call the static async "create" method instead.
      */
     constructor(context: AudioContext) {
         super(context, "advanced-analyser-processor");
-        
-        const sab = new SharedArrayBuffer(
-            AudioDataManager.estimateBufSize(this.numberOfInputs, this.channelCount)
+        if (!Object.hasOwn(globalThis, "SharedArrayBuffer")) {
+            throw new Error("SharedArrayBuffer is not supported on this site");
+        }
+
+        const sabSize = AudioDataManager.estimateBufSize(
+            this.numberOfInputs,
+            this.channelCount
         );
+        const sab = new SharedArrayBuffer(sabSize);
         this.sab = sab;
         const msg: MessagePayload = {
             type: "init",

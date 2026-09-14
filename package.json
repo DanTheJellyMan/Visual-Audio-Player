@@ -27,5 +27,8 @@
     "typescript": "^6.0.3",
     "vite": "^8.0.10",
     "vitest": "^4.1.7"
+  },
+  "dependencies": {
+    "wgsl_reflect": "^1.5.0"
   }
 }

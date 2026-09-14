@@ -1,6 +1,6 @@
 import AudioDataManager from "../analyser/AudioDataManager";
 import strictObjectAssign from "../utils/strictObjectAssign";
-import { sab, ctx, init } from "./renderHandler";
+import { RenderFnState, sab, ctx, init, render, getShaderTimestampLogs } from "./renderHandler";
 
 export type InitData = {
     sab: SharedArrayBuffer,
@@ -8,8 +8,8 @@ export type InitData = {
 };
 
 export type Config = {
-    fps: number,
-    fftRatio: number
+    fftRatio: number,
+    fps: number
 };
 
 export type MessagePayload =
@@ -24,13 +24,13 @@ export type MessagePayload =
 {
     type: "get-bitmap",
     data?: ImageBitmap
-}
-;
+};
 
 let config: Config | null = null;
-let renderFn: (() => Promise<void>) | null = null;
-let renderRequestAnimationFrameId: number = 0;
-let renderIntervalId: number = 0;
+let renderState: RenderFnState | null = null;
+let renderReqAniFrameId: number = 0;
+let renderIntId: number = 0;
+let logIntMs = 5_000;
 
 self.onmessage = handleMessage;
 self.postMessage("Ready");
@@ -40,7 +40,7 @@ function handleMessage(e: MessageEvent<MessagePayload>): void {
 
     switch(type) {
         case "init": {
-            renderFn = init(data.sab, data.canvas);
+            renderState = init(data.sab, data.canvas);
             break;
         }
         case "config-update": {
@@ -48,23 +48,19 @@ function handleMessage(e: MessageEvent<MessagePayload>): void {
                 // Apply all options of new config
                 const strictData = data as Required<Config>;
                 config = strictData;
-                
-                if (sab) {
-                    const man = new AudioDataManager(sab);
-                    if (config.fftRatio) {
-                        man.setHeader({
-                            fftRatio: config.fftRatio
-                        });
+                handleRenderLoop(config.fps);
+                if (!sab) return;
+
+                const headerKeys = Object.keys(AudioDataManager.HEADER_LAYOUT);
+                let headerConfig: Pick<Config, keyof typeof AudioDataManager["HEADER_LAYOUT"]>;
+                for (const [configKey] of Object.entries()) {
+                    if (!Object.hasOwn(headerKeys, configKey)) {
+
                     }
-                } else {
-                    console.error(
-                        "Could not set FFT ratio. Ensure to initialize first with the SharedArrayBuffer before setting the config."
-                    );
                 }
-                
-                if (config.fps) {
-                    handleRenderLoop(config.fps);
-                }
+                const headerData = Object.fromEntries();
+                const man = new AudioDataManager(sab);
+                man.setHeader(config);
             } else {
                 const oldConfig = structuredClone(config);
                 // Apply only options that changed from oldConfig to config (updated)
@@ -102,35 +98,61 @@ function handleMessage(e: MessageEvent<MessagePayload>): void {
 }
 
 function handleRenderLoop(fps: number) {
-    cancelAnimationFrame(renderRequestAnimationFrameId);
-    clearInterval(renderIntervalId);
-    renderRequestAnimationFrameId = 0;
-    renderIntervalId = 0;
+    cancelAnimationFrame(renderReqAniFrameId);
+    clearInterval(renderIntId);
+    renderReqAniFrameId = 0;
+    renderIntId = 0;
+
+    const logShaders = async (force = false) => {
+        const { logs } = renderState!;
+        const t = performance.now();
+        if (force ||
+            (renderState!.sampChanged && (t >= logs.lastLogTs + logIntMs))
+        ) {
+            logs.lastLogTs = t;
+            const logContent = await getShaderTimestampLogs(
+                renderState!.bufs.tsQuerySetReadBuf,
+                logs
+            );
+            console.log(logContent);
+        }
+    }
 
     if (fps === Infinity || fps === -Infinity) {
         // Render continuously at refresh rate with requestAnimationFrame()
-        const loopFn = async (timestamp: DOMHighResTimeStamp) => {
-            if (renderFn) await renderFn();
-            renderRequestAnimationFrameId = requestAnimationFrame(loopFn);
+        const loopFn = async (ts: DOMHighResTimeStamp) => {
+            if (renderState) {
+                await render(renderState);
+                await logShaders();
+            }
+            renderReqAniFrameId = requestAnimationFrame(loopFn);
         };
-        renderRequestAnimationFrameId = requestAnimationFrame(loopFn);
+        renderReqAniFrameId = requestAnimationFrame(loopFn);
     } else if (fps < 0) {
         // Render a specific amount of frames at refresh rate
         const totalRenderCt = Math.abs(fps);
         let renderCt = 0;
-        const loopFn = async (timestamp: DOMHighResTimeStamp) => {
-            if (renderFn) {
+        const loopFn = async (ts: DOMHighResTimeStamp) => {
+            if (renderState) {
                 if (renderCt >= totalRenderCt) return;
                 renderCt++;
-                await renderFn();
+                await render(renderState);
+                await logShaders();
             }
-            renderRequestAnimationFrameId = requestAnimationFrame(loopFn);
+            renderReqAniFrameId = requestAnimationFrame(loopFn);
         };
-        renderRequestAnimationFrameId = requestAnimationFrame(loopFn);
+        renderReqAniFrameId = requestAnimationFrame(loopFn);
     } else if (fps > 0 && fps < Infinity) {
         // Render at a specified FPS from (0, Infinity)
+        // Prevents beginning another render before the last one finishes
+        let doneRendering = true;
         setInterval(async () => {
-            if (renderFn) await renderFn();
+            if (renderState && doneRendering) {
+                doneRendering = false;
+                await render(renderState);
+                await logShaders();
+                doneRendering = true;
+            }
         }, 1000 / fps);
     }
     // fps = 0, cancels any future rendering

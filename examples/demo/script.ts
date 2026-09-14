@@ -39,15 +39,18 @@ worker.addEventListener("message", (e) => {
             canvas: offCanv
         }
     };
+    worker.postMessage(initMessagePayload, [offCanv]);
+
+    setInterval(() => {
     const configMessagePayload: WorkerMessagePayload = {
         type: "config-update",
         data: {
-            fftRatio: 12,
-            fps: Infinity
+            fftRatio: randInt(5, 12),
+            fps: randInt(15, 45)
         }
     };
-    worker.postMessage(initMessagePayload, [offCanv]);
     worker.postMessage(configMessagePayload);
+    }, 1000*5);
 }, { once: true });
 
 dbAudioToggleEl.addEventListener("change", (e) => {
@@ -56,6 +59,7 @@ dbAudioToggleEl.addEventListener("change", (e) => {
 audio.addEventListener("play", handleAudioPlay);
 audio.addEventListener("pause", handleAudioPause);
 audio.addEventListener("timeupdate", handleTimeupdate);
+audio.addEventListener("volumechange", handleVolumechange);
 audioInput.addEventListener("input", handleAudioInput);
 canvasEl.addEventListener("dblclick", () => canvasEl.requestFullscreen());
 
@@ -115,7 +119,8 @@ async function handleAudioInput(e: Event) {
         playedInitiallyFromDbLoad = true;
         const currentTime = sessionStorage.getItem("audioCurrentTime");
         audio.currentTime = parseFloat(currentTime === null ? "0" : currentTime);
-        audio.volume = 0.25;
+        const volume = sessionStorage.getItem("audioVolume");
+        audio.volume = parseFloat(volume === null ? "0.25" : volume);
         await audio.play();
         console.log("Auto play from DB load");
     }
@@ -135,6 +140,9 @@ function handleTimeupdate(e: Event) {
     if (dbAudioStorageEnabled) {
         sessionStorage.setItem("audioCurrentTime", `${audio.currentTime}`);
     }
+}
+function handleVolumechange(e: Event) {
+    sessionStorage.setItem("audioVolume", `${audio.volume}`);
 }
 
 function setAudioSrc(audio: HTMLAudioElement, file: File): void {

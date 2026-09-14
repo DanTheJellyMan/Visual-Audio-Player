@@ -273,7 +273,24 @@ export default class AudioDataManager {
         return inputs;
     }
 
-    public getSamples(inputIndex: number, channelIndex: number, sampleCount: number, startIndex = this.getHeader("processHeadIndex").processHeadIndex-1, searchDirection: -1 | 1 = -1, dstArr = new Float32Array(sampleCount)): Float32Array {
+    /**
+     * 
+     * @param inputIndex 
+     * @param channelIndex 
+     * @param sampleCount 
+     * @param startIndex 
+     * @param searchDirection 
+     * @param dstArr 
+     * @returns 
+     */
+    public getSamples(
+        inputIndex: number,
+        channelIndex: number,
+        sampleCount: number,
+        startIndex = this.getHeader("processHeadIndex").processHeadIndex-1,
+        searchDirection: -1 | 1 = -1,
+        dstArr: Float32Array<ArrayBuffer> = new Float32Array(sampleCount)
+    ): Float32Array<ArrayBuffer> {
         const paramInfo = `inputIndex: ${inputIndex}, channelIndex: ${channelIndex}, sampleCount: ${sampleCount}`;
         const INP_OOB_ERR = new Error(`Input index out of bounds - ${paramInfo}`);
         const CH_OOB_ERR = new Error(`Channel index out of bounds - ${paramInfo}`);
@@ -321,7 +338,7 @@ export default class AudioDataManager {
             }
 
             /**
-             * This is meant for preventing too many samples from being set onto samples by removing excess samples from a half, starting from the end of the half
+             * Prevents too many samples from being set onto samples by removing excess samples from a half, starting from the end of the half
              * @param h 
              * @returns 
              */

@@ -303,6 +303,8 @@ function randSample(): number {
 }
 
 function getManagerConfig(randomTesting: boolean = true) {
+    const minFFT = AudioDataManager.FFT_RATIO_MIN.value;
+    const maxFFT = AudioDataManager.FFT_RATIO_MAX.value;
     const sfls = new Array(5).fill(128/2).map((value, i) => value * (2**i));
     const rates = [44100, 48000, 96000] as const;
     const inputRange = [1, 5] as const;
@@ -317,13 +319,13 @@ function getManagerConfig(randomTesting: boolean = true) {
     if (randomTesting) {
         sampleFrameLength = sfls[randInt(0, sfls.length-1)];
         sampleRate = rates[randInt(0, rates.length-1)];
-        fftRatio = randInt(AudioDataManager.FFT_RATIO_MIN.value, AudioDataManager.FFT_RATIO_MAX.value);
+        fftRatio = randInt(minFFT, maxFFT);
         inputCount = randInt(inputRange[0], inputRange[1]);
         maxChannelCount = randInt(channelRange[0], channelRange[1]);
     } else {
         sampleFrameLength = 128;
         sampleRate = rates[0];
-        fftRatio = AudioDataManager.FFT_RATIO_MIN.value;
+        fftRatio = minFFT;
         inputCount = inputRange[0];
         maxChannelCount = channelRange[0];
     }
