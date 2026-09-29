@@ -43,12 +43,16 @@ fn vert_main(
 
     let position = vec4f(x, y, 0.5, 1.0);
 
-    let r = f32(sample_index%4)/3.0;
-    let b = f32(sample_index%2);
+    let prog_x = f32(sample_index) / f32(sample_count);
+    let prog_y = (y + 1.0) / 2.0;
+    let r_x = f32(sample_index%15)/14.0 * prog_x;
+    let g_x = (1.0 - prog_x) / 2.0;
+    let b_x = (cos(f32(sample_index%2) * f32(sample_index%7))+1.0)/3.25;
+    let avg = (r_x+g_x+b_x)/3.0;
     let color = select(
-        vec4f(r/2.0, r*b/3.0, b, 1.0),
-        vec4f(0.9, 0.25/4.0, 0.75, 1.0),
-        vec4(r == 0.0 && b == 0.0)
+        vec4f(r_x+(b_x*0.075), g_x-(b_x*0.3), b_x-(b_x*0.15), 1.0),
+        vec4f(mix(r_x, 1.0, 0.5), mix(g_x, 0.75, 0.4), mix(b_x, 0.825, 0.125), 1.0),
+        vec4(sample_index%17==0||sample_index%13==0||sample_index%37==0)
     );
 
     var output: VertexOut;

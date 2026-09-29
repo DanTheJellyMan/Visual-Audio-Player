@@ -41,16 +41,18 @@ worker.addEventListener("message", (e) => {
     };
     worker.postMessage(initMessagePayload, [offCanv]);
 
-    setInterval(() => {
+    // setInterval(() => {
     const configMessagePayload: WorkerMessagePayload = {
         type: "config-update",
         data: {
-            fftRatio: randInt(5, 12),
-            fps: randInt(15, 45)
+            fftRatio: 8,
+            fps: Infinity
+            // fftRatio: randInt(5, 12),
+            // fps: randInt(15, 45)
         }
     };
     worker.postMessage(configMessagePayload);
-    }, 1000*5);
+    // }, 1000*5);
 }, { once: true });
 
 dbAudioToggleEl.addEventListener("change", (e) => {

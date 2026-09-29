@@ -10,6 +10,16 @@ var<storage, read> audio_samples: array<f32>;
 @group(0) @binding(2)
 var<storage, read_write> complex_samples: array<ComplexPair>;
 
+fn reverse_bits(value: u32, bit_count: u32) -> u32 {
+    var result = 0u;
+
+    for (var i = 0u; i < bit_count; i++) {
+        result = (result << 1u) | ((value >> i) & 1u);
+    }
+
+    return result;
+}
+
 @compute @workgroup_size(64)
 fn preprocess_samples(
     @builtin(global_invocation_id) gid: vec3u
@@ -20,13 +30,21 @@ fn preprocess_samples(
         return;
     }
 
-    complex_samples[i] = ComplexPair(audio_samples[i], 0.0);
+    // FFT size is always a power of 2,
+    // so this tells us how many bits are in an index.
+    let bit_count = u32(log2(f32(len)));
+
+    let reversed_i = reverse_bits(i, bit_count);
+
+    complex_samples[reversed_i] = ComplexPair(audio_samples[i], 0.0);
 }
 
 @group(0) @binding(1)
 var<storage, read> fft_input: array<ComplexPair>;
 @group(0) @binding(2)
 var<storage, read_write> fft_output: array<ComplexPair>;
+@group(0) @binding(3)
+var<uniform> stage: u32;
 
 fn complex_mul(a: ComplexPair, b: ComplexPair) -> ComplexPair {
     return ComplexPair(
@@ -61,7 +79,7 @@ fn fft_stage(
     // stage 1 -> 4
     // stage 2 -> 8
     // ...
-    let half_size = 1u << gl_uniforms.fft.stage;
+    let half_size = 1u << stage;
     let butterfly_size = half_size * 2u;
 
     // Which butterfly group are we in?
@@ -121,6 +139,11 @@ var<storage, read> mag_input: array<ComplexPair>;
 @group(0) @binding(2)
 var<storage, read_write> mag_output: array<f32>;
 
+fn log10(x: f32) -> f32 {
+    // Logarithm base-change identity
+    return log2(x) / log2(10.0);
+}
+
 @compute @workgroup_size(64)
 fn magnitude(
     @builtin(global_invocation_id) gid: vec3u
@@ -133,14 +156,12 @@ fn magnitude(
 
     let real = mag_input[i].real;
     let imag = mag_input[i].imag;
-    let mag = sqrt(pow(real, 2.0) + pow(imag, 2.0)); // Pythagorean theorem
-    var norm = mag * 2.0 / f32(size);
+
+    // Pythagorean theorem
+    let mag = sqrt(pow(real, 2.0) + pow(imag, 2.0));
+
+    var norm = 2.0 * mag / f32(size);
     let db = 20.0 * log10(max(norm, 1e-6));
 
     mag_output[i] = db;
-}
-
-fn log10(x: f32) -> f32 {
-    // Logarithm base-change identity
-    return log2(x) / log2(10.0);
 }

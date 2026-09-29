@@ -1,6 +1,7 @@
 import AudioDataManager from "../analyser/AudioDataManager";
 import strictObjectAssign from "../utils/strictObjectAssign";
-import { RenderFnState, sab, ctx, init, render, getShaderTimestampLogs } from "./renderHandler";
+import { RenderFnState, sab, ctx, init, render, getShaderTimestampLogs }
+    from "./renderHandler";
 
 export type InitData = {
     sab: SharedArrayBuffer,
@@ -11,6 +12,11 @@ export type Config = {
     fftRatio: number,
     fps: number
 };
+
+type ManagerHeaderConfig = Pick<
+    Config,
+    keyof typeof AudioDataManager["HEADER_LAYOUT"] & keyof Config
+>;
 
 export type MessagePayload =
 {
@@ -48,42 +54,34 @@ function handleMessage(e: MessageEvent<MessagePayload>): void {
                 // Apply all options of new config
                 const strictData = data as Required<Config>;
                 config = strictData;
-                handleRenderLoop(config.fps);
-                if (!sab) return;
-
-                const headerKeys = Object.keys(AudioDataManager.HEADER_LAYOUT);
-                let headerConfig: Pick<Config, keyof typeof AudioDataManager["HEADER_LAYOUT"]>;
-                for (const [configKey] of Object.entries()) {
-                    if (!Object.hasOwn(headerKeys, configKey)) {
-
-                    }
-                }
-                const headerData = Object.fromEntries();
-                const man = new AudioDataManager(sab);
-                man.setHeader(config);
             } else {
-                const oldConfig = structuredClone(config);
                 // Apply only options that changed from oldConfig to config (updated)
-                strictObjectAssign(config, data);
-
-                if (sab) {
-                    const man = new AudioDataManager(sab);
-                    if (config.fftRatio && oldConfig.fftRatio !== config.fftRatio) {
-                        man.setHeader({
-                            fftRatio: config.fftRatio
-                        });
-                    }
-                }
-
-                if (config.fps && oldConfig.fps !== config.fps) {
-                    handleRenderLoop(config.fps);
-                }
+                const partialData = data as Partial<Config>;
+                strictObjectAssign(config, partialData);
             }
+            if (!sab) return;
+            
+            type Entries<T> = [keyof T, T[keyof T]][];
+            const manHdrConfigKeySet = new Set(Object.keys(config));
+            const manHdrLytKeySet = new Set(
+                Object.keys(AudioDataManager.HEADER_LAYOUT)
+                .filter((hdrKey) => manHdrConfigKeySet.has(hdrKey))
+            );
+            const manHdrConfig = Object.fromEntries(
+                (Object.entries(structuredClone(config)) as Entries<Config>)
+                .filter(([key]) => manHdrLytKeySet.has(key))
+            ) as ManagerHeaderConfig;
+            new AudioDataManager(sab).setHeader(manHdrConfig);
+            
+            handleRenderLoop(config.fps);
             break;
         }
         case "get-bitmap": {
             if (!ctx) {
-                console.error("Cannot retrieve ImageBitmap from rendering canvas - uninitialized canvas context");
+                console.error(
+                    "Cannot retrieve ImageBitmap from rendering canvas - "+
+                    "uninitialized canvas context"
+                );
                 return;
             }
             
@@ -112,7 +110,7 @@ function handleRenderLoop(fps: number) {
             logs.lastLogTs = t;
             const logContent = await getShaderTimestampLogs(
                 renderState!.bufs.tsQuerySetReadBuf,
-                logs
+                true
             );
             console.log(logContent);
         }

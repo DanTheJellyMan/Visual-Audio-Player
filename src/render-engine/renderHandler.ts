@@ -179,7 +179,7 @@ export async function render<T extends RenderFnState>(state: T): Promise<T> {
         }
         state.sampChanged = true;
 
-        // FOR TESTING
+        // FOR TESTING (interp should be implemented on the gpu, not cpu)
         for (let i=0; i<manSampArr.length; i++) {
             manSampArr[i] = cerp(oldSampArr[i], manSampArr[i], 0.3);
         }
@@ -193,7 +193,6 @@ export async function render<T extends RenderFnState>(state: T): Promise<T> {
 
     if (fftSize !== state.lastFFTSize) {
         const writerOut = glUniWriter(commonReflect, "fft.size", [fftSize]);
-        console.log("writer output:", writerOut);
         device.queue.writeBuffer(
             bufs.glUniBuf,
             writerOut.gpuBufOffset,
@@ -217,6 +216,10 @@ export async function render<T extends RenderFnState>(state: T): Promise<T> {
     preprocessPass.dispatchWorkgroups(wkgrpCt);
     preprocessPass.end();
 
+    const alignment = device.limits.minUniformBufferOffsetAlignment;
+    const stageStride = Math.ceil(4 / alignment) * alignment;
+    const stageCt = Math.log2(fftSize);
+    const bflyWkgrpCt = Math.ceil(fftSize / 2 / 64);
     const fftPass = commandEncoder.beginComputePass({
         timestampWrites: {
             querySet: tsQuerySet,
@@ -225,10 +228,14 @@ export async function render<T extends RenderFnState>(state: T): Promise<T> {
         }
     });
     fftPass.setPipeline(pipes.compFFTPipe);
-    fftPass.setBindGroup(0, grps.compFFTGrp);
-    fftPass.dispatchWorkgroups(wkgrpCt);
+    for (let stage=0; stage<stageCt; stage++) {
+        const fftGrp = stage % 2 === 0 ? grps.compFFTGrp : grps.compFFTPongGrp;
+        fftPass.setBindGroup(0, fftGrp, [stage * stageStride]);
+        fftPass.dispatchWorkgroups(bflyWkgrpCt);
+    }
     fftPass.end();
 
+    const magGrp = stageCt % 2 !== 0 ? grps.compMagGrp : grps.compMagPongGrp;
     const magnitudePass = commandEncoder.beginComputePass({
         timestampWrites: {
             querySet: tsQuerySet,
@@ -237,7 +244,7 @@ export async function render<T extends RenderFnState>(state: T): Promise<T> {
         }
     });
     magnitudePass.setPipeline(pipes.compMagPipe);
-    magnitudePass.setBindGroup(0, grps.compMagGrp);
+    magnitudePass.setBindGroup(0, magGrp);
     magnitudePass.dispatchWorkgroups(wkgrpCt);
     magnitudePass.end();
 
@@ -293,7 +300,6 @@ function cerp(a: number, b: number, t: number): number {
  */
 export async function getShaderTimestampLogs(
     tsQuerySetReadBuf: RenderFnState["bufs"]["tsQuerySetReadBuf"],
-    logs: RenderFnState["logs"],
     displayNs = false
 ) {
     const readBufSize = tsQuerySetReadBuf.size;
@@ -304,15 +310,33 @@ export async function getShaderTimestampLogs(
 
     const tsArr = new BigUint64Array(tsAbCpy);
     const divisor = displayNs ? 1n : BigInt(1e+6);
-    const preprocessTime = (tsArr[1] - tsArr[0]) / divisor;
-    const fftTime = (tsArr[3] - tsArr[2]) / divisor;
-    const magnitudeTime = (tsArr[5] - tsArr[4]) / divisor;
-    const renderTime = (tsArr[7] - tsArr[6]) / divisor;
+    const preprocT = (tsArr[1] - tsArr[0]) / divisor;
+    const fftT = (tsArr[3] - tsArr[2]) / divisor;
+    const magT = (tsArr[5] - tsArr[4]) / divisor;
+    const renderT = (tsArr[7] - tsArr[6]) / divisor;
     tsAbCpy.transferToFixedLength(0);
 
+    const getLblPrefix = (lbl: string) => lbl.substring(0, lbl.indexOf(":"));
+    const padLblPrefix = (lbl: string, spaceCt: number) => {
+        const colonI = lbl.indexOf(":");
+        return (
+            lbl.substring(0, colonI).padStart(spaceCt, " ") +
+            lbl.substring(colonI)
+        );
+    };
     const tf = displayNs ? "ns" : "ms";
-    const logContent = `Preprocess: ${preprocessTime+tf}\nFFT: ${fftTime+tf}\n`+
-        `Magnitude: ${magnitudeTime+tf}\nRender: ${renderTime+tf}`;
+    const lbls = [
+        `Preprocess: ${preprocT+tf}`,
+        `FFT: ${fftT+tf}`,
+        `Magnitude: ${magT+tf}`,
+        `Render: ${renderT+tf}`
+    ];
+
+    const longestLblLen = lbls.reduce((prev, curr) => {
+        return Math.max(prev, getLblPrefix(curr).length);
+    }, getLblPrefix(lbls[0]).length);
+    lbls.forEach((lbl, i) => lbls[i] = padLblPrefix(lbl, longestLblLen));
+    const logContent = lbls.join("\n");
 
     return logContent;
 }
@@ -325,7 +349,6 @@ function createReqBuffers(commonReflect: WgslReflect, tsQuerySet: GPUQuerySet) {
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
         label: "global_uniform_buffer"
     });
-    console.log(`global uniform buffer size: ${glUniBufSize}`);
 
     const audioSampBuf = device.createBuffer({
         size: maxFFTSize * 4,
@@ -334,16 +357,32 @@ function createReqBuffers(commonReflect: WgslReflect, tsQuerySet: GPUQuerySet) {
             | GPUBufferUsage.COPY_SRC,
         label: "audio_sample_buffer"
     });
+
     const compSampBuf = device.createBuffer({
         size: audioSampBuf.size * 2,
         usage: audioSampBuf.usage,
         label: "complex_sample_buffer"
     });
+
     const fftBuf = device.createBuffer({
         size: compSampBuf.size,
         usage: audioSampBuf.usage,
         label: "fft_buffer"
     });
+
+    const alignment = device.limits.minUniformBufferOffsetAlignment;
+    const stageStride = Math.ceil(4 / alignment) * alignment;
+    const stageCt = Math.log2(maxFFTSize);
+    const stageBuf = device.createBuffer({
+        size: stageStride * stageCt,
+        usage: glUniBuf.usage
+    });
+    for (let stage=0; stage<stageCt; stage++) {
+        const value = new Uint32Array([stage]);
+        // console.log(`Stage stride: ${stageStride}`);
+        device.queue.writeBuffer(stageBuf, stage * stageStride, value);
+    }
+
     const magBuf = device.createBuffer({
         size: audioSampBuf.size,
         usage: audioSampBuf.usage,
@@ -364,6 +403,7 @@ function createReqBuffers(commonReflect: WgslReflect, tsQuerySet: GPUQuerySet) {
         audioSampBuf,
         compSampBuf,
         fftBuf,
+        stageBuf,
         magBuf,
         tsQuerySetBuf,
         tsQuerySetReadBuf
@@ -421,6 +461,14 @@ function createReqLayouts() {
                 visibility: GPUShaderStage.COMPUTE,
                 buffer: {
                     type: "storage"
+                }
+            },
+            {
+                binding: 3,
+                visibility: GPUShaderStage.COMPUTE,
+                buffer: {
+                    type: "uniform",
+                    hasDynamicOffset: true
                 }
             }
         ]
@@ -525,9 +573,47 @@ function createReqGroups(
                 resource: {
                     buffer: bufs.fftBuf
                 }
+            },
+            {
+                binding: 3,
+                resource: {
+                    buffer: bufs.stageBuf,
+                    size: 4
+                }
             }
         ],
         label: "computeFFTGroup"
+    });
+    const compFFTPongGrp = device.createBindGroup({
+        layout: lyts.compFFTLyt,
+        entries: [
+            {
+                binding: 0,
+                resource: {
+                    buffer: bufs.glUniBuf
+                }
+            },
+            {
+                binding: 2,
+                resource: {
+                    buffer: bufs.compSampBuf
+                }
+            },
+            {
+                binding: 1,
+                resource: {
+                    buffer: bufs.fftBuf
+                }
+            },
+            {
+                binding: 3,
+                resource: {
+                    buffer: bufs.stageBuf,
+                    size: 4
+                }
+            }
+        ],
+        label: "computeFFTPongGroup"
     });
     const compMagGrp = device.createBindGroup({
         layout: lyts.compMagLyt,
@@ -542,6 +628,30 @@ function createReqGroups(
                 binding: 1,
                 resource: {
                     buffer: bufs.fftBuf
+                }
+            },
+            {
+                binding: 2,
+                resource: {
+                    buffer: bufs.magBuf
+                }
+            }
+        ],
+        label: "computeMagnitudeGroup"
+    });
+    const compMagPongGrp = device.createBindGroup({
+        layout: lyts.compMagLyt,
+        entries: [
+            {
+                binding: 0,
+                resource: {
+                    buffer: bufs.glUniBuf
+                }
+            },
+            {
+                binding: 1,
+                resource: {
+                    buffer: bufs.compSampBuf
                 }
             },
             {
@@ -574,7 +684,9 @@ function createReqGroups(
     return {
         preprocSampGrp,
         compFFTGrp,
+        compFFTPongGrp,
         compMagGrp,
+        compMagPongGrp,
         renderSampGrp
     };
 }
@@ -599,7 +711,7 @@ function createReqPipelines(
         }),
         compute: {
             module: fftShader,
-            entryPoint: "dft"
+            entryPoint: "fft_stage"
         }
     });
     const compMagPipe = device.createComputePipeline({

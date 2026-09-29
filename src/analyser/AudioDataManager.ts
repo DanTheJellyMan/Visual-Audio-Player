@@ -68,7 +68,7 @@ export default class AudioDataManager {
         fftRatio: Uint8
     });
     public static readonly FFT_RATIO_MIN = new AudioDataManager["HEADER_LAYOUT_WRAPPERS"]["fftRatio"](5);
-    public static readonly FFT_RATIO_MAX = new AudioDataManager["HEADER_LAYOUT_WRAPPERS"]["fftRatio"](15);
+    public static readonly FFT_RATIO_MAX = new AudioDataManager["HEADER_LAYOUT_WRAPPERS"]["fftRatio"](20);
 
     public static HEADER_SIZE: number;
     public static HEADER_LAYOUT: Readonly<HeaderLayout>;
