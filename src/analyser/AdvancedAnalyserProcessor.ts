@@ -1,6 +1,6 @@
 import { TypedArray, Dictionary } from "../utils/types";
 import strictObjectAssign from "../utils/strictObjectAssign";
-import { Config, MessagePayload } from "./AdvancedAnalyserNode";
+import { MessagePayload } from "./AdvancedAnalyserNode";
 import AudioDataManager, { Process } from "./AudioDataManager";
 
 type ParameterDescriptor = {
@@ -9,6 +9,14 @@ type ParameterDescriptor = {
     minValue: number,
     maxValue: number,
     defaultValue: number
+};
+
+/**
+ * The value of each entry is the count of the code which has been returned
+ */
+type ProcessWriteInfo = {
+    lastCode: string,
+    codes: { [processWriteInfoCode: string]: number }
 };
 
 class AdvancedAnalyserProcessor extends AudioWorkletProcessor {
@@ -24,6 +32,10 @@ class AdvancedAnalyserProcessor extends AudioWorkletProcessor {
 
     private options: AudioWorkletNodeOptions;
     private manager: AudioDataManager | null = null;
+    private procWriteInfo: ProcessWriteInfo = {
+        lastCode: "",
+        codes: {}
+    };
 
     constructor(options: AudioWorkletNodeOptions) {
         super();
@@ -39,13 +51,20 @@ class AdvancedAnalyserProcessor extends AudioWorkletProcessor {
             case "init": {
                 const { sab } = data;
                 this.manager = new AudioDataManager(sab);
-                this.manager.initHeader(sampleRate, AudioDataManager["FFT_RATIO_MIN"].value);
+                this.manager.initHeader(
+                    sampleRate,
+                    AudioDataManager["FFT_RATIO_MIN"].value
+                );
                 break;
             }
         }
     }
 
-    process(inputs: Process, outputs: Process, parameters: Record<string, Float32Array>): boolean {
+    process(
+        inputs: Process,
+        outputs: Process,
+        parameters: Record<string, Float32Array>
+    ): boolean {
         const { manager } = this;
         if (manager) {
             manager.setHeader({
@@ -54,13 +73,36 @@ class AdvancedAnalyserProcessor extends AudioWorkletProcessor {
             });
 
             const result = manager.writeProcess(inputs);
-            if (result !== 0) {
-                console.error(`AudioDataManager process writing error (${result})`);
-            }
+            this.handleProcessLog(result);
         }
 
         copyInputsToOutputs(inputs, outputs);
         return true;
+    }
+
+    private handleProcessLog(code: number): void {
+        const { procWriteInfo } = this;
+        const codeStr = String(code);
+        if (!Object.hasOwn(procWriteInfo.codes, codeStr)) {
+            procWriteInfo.codes[codeStr] = 0;
+        }
+        procWriteInfo.codes[codeStr]++;
+        procWriteInfo.lastCode = codeStr;
+        for (const code of Object.keys(procWriteInfo.codes)) {
+            if (code === codeStr) continue;
+            const codeCt = procWriteInfo.codes[code];
+            procWriteInfo.codes[code] = Math.max(0, codeCt-1);
+        }
+
+        const errorLogFn = parseInt(codeStr) % 2 === 0
+        ? console.warn
+        : console.error;
+        if (codeStr !== "0" && procWriteInfo.codes[codeStr] <= 2) {
+            errorLogFn.call(
+                null,
+                `AudioDataManager process writing error (${codeStr})`
+            );
+        }
     }
 }
 

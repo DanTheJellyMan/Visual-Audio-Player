@@ -86,7 +86,8 @@ function prepRenderer() {
         renderShaderMod.getCompilationInfo()
     ])
     .then((infos) => {
-        console.info("shader module compilation info:\n\t", ...infos);
+        console.info("shader module compilation info:");
+        infos.forEach((info) => console.info(...info.messages));
     });
 
     const commonReflect = new WgslReflect(commonShaderCode);
@@ -138,6 +139,13 @@ export async function render<T extends RenderFnState>(state: T): Promise<T> {
         return state;
     }
 
+    // TODO: utilize an FFT hop size, so that I'm not recalculating FFT
+    // every frame (hop size = sample rate * FFT update interval in seconds),
+    // but rather maybe every 0.01s (10ms). This will cut down on
+    // visually-redundant FFT computation.
+    // Need to use Hann window function before FFT to reduce spectral leakage.
+    // If wanting to combine channels' spectrums after FFT, use combined spectrum
+    // with, for example, RMS/power combination
     const { commonReflect, tsQuerySet, bufs, lyts, grps, pipes, sampAbQueue, logs } = state;
     const minFFTRatio = AudioDataManager.FFT_RATIO_MIN.value;
     const maxFFTRatio = AudioDataManager.FFT_RATIO_MAX.value;
@@ -169,10 +177,10 @@ export async function render<T extends RenderFnState>(state: T): Promise<T> {
     // the fft sizes change.
     const manSampBuf = man.getSamples(0, 0, fftSize, processHeadIndex, -1).buffer
         .transferToFixedLength(maxFFTSize * Float32Array.BYTES_PER_ELEMENT);
+    normalizeArr(new Float32Array(manSampBuf));
     if (oldSampBuf !== undefined) {
         const oldSampArr = new Float32Array(oldSampBuf);
         const manSampArr = new Float32Array(manSampBuf);
-        normalizeArr(manSampArr);
         if (arrayEquals(oldSampArr, manSampArr)) {
             state.sampChanged = false;
             return state;

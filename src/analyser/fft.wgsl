@@ -140,7 +140,7 @@ var<storage, read> mag_input: array<ComplexPair>;
 var<storage, read_write> mag_output: array<f32>;
 
 fn log10(x: f32) -> f32 {
-    // Logarithm base-change identity
+    // Log base-change identity
     return log2(x) / log2(10.0);
 }
 
@@ -157,11 +157,9 @@ fn magnitude(
     let real = mag_input[i].real;
     let imag = mag_input[i].imag;
 
-    // Pythagorean theorem
-    let mag = sqrt(pow(real, 2.0) + pow(imag, 2.0));
-
+    let mag = sqrt(real*real + imag*imag);
     var norm = 2.0 * mag / f32(size);
-    let db = 20.0 * log10(max(norm, 1e-6));
+    let db = 20.0 * log10(norm);
 
     mag_output[i] = db;
 }

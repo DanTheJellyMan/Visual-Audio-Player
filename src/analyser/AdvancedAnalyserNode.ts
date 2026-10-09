@@ -21,7 +21,14 @@ export default class AdvancedAnalyserNode extends AudioWorkletNode {
      * Call the static async "create" method instead.
      */
     constructor(context: AudioContext) {
-        super(context, "advanced-analyser-processor");
+        // For testing while I figure out what to do for multiple audio channels
+        super(context, "advanced-analyser-processor", {
+            numberOfInputs: 1,
+            numberOfOutputs: 1,
+            channelCount: 1,
+            channelCountMode: "explicit",
+            channelInterpretation: "speakers"
+        });
         if (!Object.hasOwn(globalThis, "SharedArrayBuffer")) {
             throw new Error("SharedArrayBuffer is not supported on this site");
         }

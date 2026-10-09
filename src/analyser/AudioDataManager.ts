@@ -1,4 +1,4 @@
-import { NumberWrapperTypes, BigIntWrappers, NonBigIntWrappers, Int8, Int16, Int32, Int64, Uint8, Uint16, Uint32, Uint64, Float16, Float32, Float64 } from "../utils/numberWrappers";
+import { NumberWrapperTypes, BigIntWrappers, NonBigIntWrappers, Uint8, Uint32, Uint64, Float32, Float64 } from "../utils/numberWrappers";
 
 type HeaderLayoutMember = {
     byteOffset: number;
@@ -178,11 +178,25 @@ export default class AudioDataManager {
 
     /**
      * @param inputs 
-     * @returns If there is not enough space in buffer to write, returns 1, otherwise 0 for success
+     * @returns (Note: non-zero codes that are even are not critical errors)
+     * 
+     * 2 - empty inputs were given
+     * 
+     * 1 - not enough space in buffer to write
+     * 
+     * 0 - success
      */
-    public writeProcess(inputs: Process): 0 | 1 {
+    public writeProcess(inputs: Process): number {
+        if (inputs[0][0] === undefined) {
+            return 2;
+        }
+
         // TODO: for all body read/write methods, use Atomics
-        const { inputSpacer, processSpacerStart, processSpacerEnd } = AudioDataManager.RESERVED_BODY_VALUES;
+        const {
+            inputSpacer,
+            processSpacerStart,
+            processSpacerEnd
+        } = AudioDataManager.RESERVED_BODY_VALUES;
         const { arr } = this;
         const { processHeadIndex } = this.getHeader("processHeadIndex");
         const sampleFrameLength = inputs[0][0].length;

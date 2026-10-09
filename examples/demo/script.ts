@@ -1,108 +1,82 @@
 import AudioDataManager from "../../src/analyser/AudioDataManager";
 import AdvancedAnalyserNode from "../../src/analyser/AdvancedAnalyserNode";
-import { InitData as WorkerInitData, MessagePayload as WorkerMessagePayload } from "../../src/render-engine/worker";
-import { randInt } from "../../src/utils/randomNumber";
+import { WorkerMessagePayload } from "../../src/render-engine/worker";
+import { getDbStorageFlag } from "./audioInputScript";
+import estimateRefreshRate from "./estimateRefreshRate";
+import { getFps, setFps, getFFTRatio, setFFTRatio } from "./optionsScript";
 
-const dbAudioToggleEl: HTMLInputElement = document.querySelector("input[type='checkbox']#db-audio-toggle")!;
-const dbAudioStorageEnabled = (function(){
-    const v = localStorage.getItem("allowDbAudioStorage");
-    if (v === null) return false;
-    return Boolean(Number(v));
-})();
-let playedInitiallyFromDbLoad = false;
-dbAudioToggleEl.checked = dbAudioStorageEnabled;
-
-const audioInput: HTMLInputElement = document.querySelector("#audio-input")!;
-const audio = document.querySelector("#music")! as HTMLAudioElement;
-const audioContext = new AudioContext();
-const analyser = await AdvancedAnalyserNode.create(audioContext);
-const sourceNode = audioContext.createMediaElementSource(audio);
-sourceNode
-.connect(analyser)
-.connect(audioContext.destination);
-await audioContext.suspend();
+const RENDER_WORKER_NAME = "renderWorker";
 
 const canvasEl: HTMLCanvasElement = document.querySelector("canvas#visualizer")!;
 canvasEl.width = screen.width * window.devicePixelRatio;
 canvasEl.height = screen.height * window.devicePixelRatio;
-canvasEl.style.aspectRatio = `${canvasEl.width} / ${canvasEl.height}`;
+canvasEl.style.setProperty(
+    "aspect-ratio",
+    `${canvasEl.width} / ${canvasEl.height}`,
+    "important"
+);
 const offCanv = canvasEl.transferControlToOffscreen();
+
+const audio: HTMLAudioElement = document.querySelector("#music")!;
+const audioContext = new AudioContext();
+const sourceNode = audioContext.createMediaElementSource(audio);
+const analyser = await AdvancedAnalyserNode.create(audioContext);
+sourceNode
+.connect(analyser)
+.connect(audioContext.destination);
 
 const workerUrl = new URL("../../src/render-engine/worker.ts", import.meta.url);
 const worker = new Worker(workerUrl, { type: "module" });
+(globalThis as any)[RENDER_WORKER_NAME] = worker;
 worker.addEventListener("message", (e) => {
     if (e.data !== "Ready") throw new Error(e.data);
+
     const initMessagePayload: WorkerMessagePayload = {
         type: "init",
-        data: {
-            sab: analyser.sab,
-            canvas: offCanv
-        }
+        data: { sab: analyser.sab, canvas: offCanv }
     };
-    worker.postMessage(initMessagePayload, [offCanv]);
-
-    // setInterval(() => {
     const configMessagePayload: WorkerMessagePayload = {
         type: "config-update",
         data: {
-            fftRatio: 8,
-            fps: Infinity
-            // fftRatio: randInt(5, 12),
-            // fps: randInt(15, 45)
+            fftRatio: getFFTRatio(),
+            fps: getFps()
         }
     };
+    worker.postMessage(initMessagePayload, [offCanv]);
     worker.postMessage(configMessagePayload);
-    // }, 1000*5);
+
+    window.addEventListener("blur", () => {
+        let currFps = getFps();
+        if (!Number.isFinite(currFps)) {
+            currFps = estimateRefreshRate();
+        }
+        const newFps = Math.ceil(currFps/5);
+        worker.postMessage({
+            type: "config-update",
+            data: {
+                fftRatio: getFFTRatio() * 0.5,
+                fps: newFps
+            }
+        } as WorkerMessagePayload);
+    });
+    window.addEventListener("focus", () => {
+        worker.postMessage({
+            type: "config-update",
+            data: {
+                fftRatio: getFFTRatio(),
+                fps: getFps()
+            }
+        } as WorkerMessagePayload);
+    });
 }, { once: true });
 
-dbAudioToggleEl.addEventListener("change", (e) => {
-    localStorage.setItem("allowDbAudioStorage", Number(dbAudioToggleEl.checked).toString());
-});
-audio.addEventListener("play", handleAudioPlay);
-audio.addEventListener("pause", handleAudioPause);
-audio.addEventListener("timeupdate", handleTimeupdate);
-audio.addEventListener("volumechange", handleVolumechange);
-audioInput.addEventListener("input", handleAudioInput);
 canvasEl.addEventListener("dblclick", () => canvasEl.requestFullscreen());
 
-const dbInitPromise: Promise<void> = new Promise((resolve) => {
-    const dbOpenRequest = indexedDB.open("AudioSource");
-    dbOpenRequest.onupgradeneeded = (e) => {
-        const db = dbOpenRequest.result;
-        db.createObjectStore("AudioFile");
-    };
-    dbOpenRequest.onsuccess = (e) => {
-        const db = dbOpenRequest.result;
-        const transaction = db.transaction("AudioFile", "readonly", { durability: "strict" });
-        const objectStore = transaction.objectStore("AudioFile");
-        const getRequest = objectStore.get("file");
-
-        const cleanup = () => {
-            try {
-                transaction.commit();
-            } catch (err) {
-                console.error(err);
-            }
-            db.close();
-            resolve();
-        };
-        getRequest.onerror = () => {
-            console.log("No previous audio files detected");
-            cleanup();
-        };
-        getRequest.onsuccess = (e) => {
-            const file: File | undefined = getRequest.result;
-            if (dbAudioStorageEnabled && file !== undefined) {
-                const dataTransfer = new DataTransfer();
-                dataTransfer.items.add(file);
-                audioInput.files = dataTransfer.files;
-                audioInput.dispatchEvent(new Event("input"));
-                console.log(`Loaded file from DB (${file.type}): ${file.name}`);
-            }
-            cleanup();
-        };
-    };
-});
+audio.addEventListener("play", handleAudioPlay);
+audio.addEventListener("pause", handleAudioPause);
+audio.addEventListener("timeupdate", handleAudioTimeupdate);
+audio.addEventListener("volumechange", handleAudioVolumechange);
+audio.addEventListener("error", handleAudioError);
 
 async function handleAudioPlay(e: Event) {
     await audioContext.resume();
@@ -110,49 +84,24 @@ async function handleAudioPlay(e: Event) {
 async function handleAudioPause(e: Event) {
     await audioContext.suspend();
 }
-async function handleAudioInput(e: Event) {
-    await dbInitPromise;
-    const target: HTMLInputElement = e.target! as HTMLInputElement;
-    if (!target.files || target.files.length !== 1) return;
-
-    const file = target.files[0];
-    setAudioSrc(audio, file);
-    if (!playedInitiallyFromDbLoad && dbAudioStorageEnabled) {
-        playedInitiallyFromDbLoad = true;
-        const currentTime = sessionStorage.getItem("audioCurrentTime");
-        audio.currentTime = parseFloat(currentTime === null ? "0" : currentTime);
-        const volume = sessionStorage.getItem("audioVolume");
-        audio.volume = parseFloat(volume === null ? "0.25" : volume);
-        await audio.play();
-        console.log("Auto play from DB load");
-    }
-    if (!dbAudioStorageEnabled) return;
-
-    indexedDB.open("AudioSource")
-    .onsuccess = (e) => {
-        const db: IDBDatabase = (e.target as any).result;
-        const transaction = db.transaction("AudioFile", "readwrite", { durability: "strict" });
-        const objectStore = transaction.objectStore("AudioFile");
-        objectStore.put(file, "file");
-        transaction.commit();
-        db.close();
-    };
-}
-function handleTimeupdate(e: Event) {
-    if (dbAudioStorageEnabled) {
+function handleAudioTimeupdate(e: Event) {
+    const dbStorageFlag = getDbStorageFlag();
+    if (dbStorageFlag) {
         sessionStorage.setItem("audioCurrentTime", `${audio.currentTime}`);
     }
 }
-function handleVolumechange(e: Event) {
+function handleAudioVolumechange(e: Event) {
     sessionStorage.setItem("audioVolume", `${audio.volume}`);
 }
+async function handleAudioError(e: Event) {
+    console.error(`Error on audio:`);
+    console.error(audio.error);
+}
 
-function setAudioSrc(audio: HTMLAudioElement, file: File): void {
-    const { src } = audio;
-    if (src !== "" && URL.canParse(src)) {
-        URL.revokeObjectURL(src);
+export function getRenderWorker(): Worker | null {
+    const worker = (globalThis as any)[RENDER_WORKER_NAME] as Worker | undefined;
+    if (worker === undefined || worker.constructor !== Worker) {
+        return null;
     }
-    const url = URL.createObjectURL(file);
-    audio.src = url;
-    console.log(`audio source: ${url}`);
+    return worker;
 }

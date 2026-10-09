@@ -6,12 +6,35 @@
     <script type="module" src="./script.ts"></script>
 </head>
 <body>
-    <label for="db-audio-toggle" title="Allows for convenient loading of previous audio files">
-        Toggle Audio File Database storage
-        <input id="db-audio-toggle" type="checkbox">
-    </label>
-    <input id="audio-input" type="file" accept="audio/*">
-    <audio id="music" controls></audio>
-    <canvas id="visualizer"></canvas>
+    <div id="audio-options">
+        <label for="db-audio-toggle" title="Allows for convenient loading of previous audio files">
+            Toggle Audio File Database storage
+            <input id="db-audio-toggle" type="checkbox">
+        </label>
+
+        <input id="audio-file-input" type="file" accept="audio/*" />
+        <script>
+            document.querySelector("#audio-file-input").files = new DataTransfer().files;
+        </script>
+        
+        <audio id="music" controls></audio>
+    </div>
+
+    <main>
+        <div class="options right">
+            <label for="fps-input">FPS: 0</label>
+            <input
+                id="fps-input" type="range"
+                step="5" min="0" max="120" value="60"
+            />
+        </div>
+
+        <canvas id="visualizer"></canvas>
+
+        <div class="options left">
+            <label for="fft-ratio-input">FFT Size: 0</label>
+            <input id="fft-ratio-input" type="range" step="1" min="5" max="15">
+        </div>
+    </main>
 </body>
 </html>

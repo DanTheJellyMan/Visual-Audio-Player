@@ -3,45 +3,45 @@ import strictObjectAssign from "../utils/strictObjectAssign";
 import { RenderFnState, sab, ctx, init, render, getShaderTimestampLogs }
     from "./renderHandler";
 
-export type InitData = {
+export type WorkerInitData = {
     sab: SharedArrayBuffer,
     canvas: OffscreenCanvas
 };
 
-export type Config = {
+export type WorkerConfig = {
     fftRatio: number,
     fps: number
 };
 
 type ManagerHeaderConfig = Pick<
-    Config,
-    keyof typeof AudioDataManager["HEADER_LAYOUT"] & keyof Config
+    WorkerConfig,
+    keyof typeof AudioDataManager["HEADER_LAYOUT"] & keyof WorkerConfig
 >;
 
-export type MessagePayload =
+export type WorkerMessagePayload =
 {
     type: "init",
-    data: InitData
+    data: WorkerInitData
 } |
 {
     type: "config-update",
-    data: Partial<Config> | Required<Config>
+    data: Partial<WorkerConfig> | Required<WorkerConfig>
 } |
 {
     type: "get-bitmap",
     data?: ImageBitmap
 };
 
-let config: Config | null = null;
+let config: WorkerConfig | null = null;
 let renderState: RenderFnState | null = null;
-let renderReqAniFrameId: number = 0;
+let renderReqAnimFrameId: number = 0;
 let renderIntId: number = 0;
 let logIntMs = 5_000;
 
 self.onmessage = handleMessage;
 self.postMessage("Ready");
 
-function handleMessage(e: MessageEvent<MessagePayload>): void {
+function handleMessage(e: MessageEvent<WorkerMessagePayload>): void {
     const { type, data } = e.data;
 
     switch(type) {
@@ -52,11 +52,12 @@ function handleMessage(e: MessageEvent<MessagePayload>): void {
         case "config-update": {
             if (config === null) {
                 // Apply all options of new config
-                const strictData = data as Required<Config>;
+                const strictData = data as Required<WorkerConfig>;
                 config = strictData;
             } else {
-                // Apply only options that changed from oldConfig to config (updated)
-                const partialData = data as Partial<Config>;
+                // Apply only options that changed from
+                // oldConfig to config (updated).
+                const partialData = data as Partial<WorkerConfig>;
                 strictObjectAssign(config, partialData);
             }
             if (!sab) return;
@@ -68,11 +69,11 @@ function handleMessage(e: MessageEvent<MessagePayload>): void {
                 .filter((hdrKey) => manHdrConfigKeySet.has(hdrKey))
             );
             const manHdrConfig = Object.fromEntries(
-                (Object.entries(structuredClone(config)) as Entries<Config>)
+                (Object.entries(structuredClone(config)) as Entries<WorkerConfig>)
                 .filter(([key]) => manHdrLytKeySet.has(key))
             ) as ManagerHeaderConfig;
             new AudioDataManager(sab).setHeader(manHdrConfig);
-            
+
             handleRenderLoop(config.fps);
             break;
         }
@@ -86,7 +87,7 @@ function handleMessage(e: MessageEvent<MessagePayload>): void {
             }
             
             const bitmap = (ctx.canvas as OffscreenCanvas).transferToImageBitmap();
-            const messagePayload: MessagePayload = {
+            const messagePayload: WorkerMessagePayload = {
                 type: "get-bitmap",
                 data: bitmap
             };
@@ -96,9 +97,9 @@ function handleMessage(e: MessageEvent<MessagePayload>): void {
 }
 
 function handleRenderLoop(fps: number) {
-    cancelAnimationFrame(renderReqAniFrameId);
+    cancelAnimationFrame(renderReqAnimFrameId);
     clearInterval(renderIntId);
-    renderReqAniFrameId = 0;
+    renderReqAnimFrameId = 0;
     renderIntId = 0;
 
     const logShaders = async (force = false) => {
@@ -123,9 +124,9 @@ function handleRenderLoop(fps: number) {
                 await render(renderState);
                 await logShaders();
             }
-            renderReqAniFrameId = requestAnimationFrame(loopFn);
+            renderReqAnimFrameId = requestAnimationFrame(loopFn);
         };
-        renderReqAniFrameId = requestAnimationFrame(loopFn);
+        renderReqAnimFrameId = requestAnimationFrame(loopFn);
     } else if (fps < 0) {
         // Render a specific amount of frames at refresh rate
         const totalRenderCt = Math.abs(fps);
@@ -137,14 +138,14 @@ function handleRenderLoop(fps: number) {
                 await render(renderState);
                 await logShaders();
             }
-            renderReqAniFrameId = requestAnimationFrame(loopFn);
+            renderReqAnimFrameId = requestAnimationFrame(loopFn);
         };
-        renderReqAniFrameId = requestAnimationFrame(loopFn);
+        renderReqAnimFrameId = requestAnimationFrame(loopFn);
     } else if (fps > 0 && fps < Infinity) {
         // Render at a specified FPS from (0, Infinity)
         // Prevents beginning another render before the last one finishes
         let doneRendering = true;
-        setInterval(async () => {
+        renderIntId = setInterval(async () => {
             if (renderState && doneRendering) {
                 doneRendering = false;
                 await render(renderState);
