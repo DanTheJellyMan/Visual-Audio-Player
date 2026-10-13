@@ -1,4 +1,3 @@
-import AudioDataManager from "../../src/analyser/AudioDataManager";
 import AdvancedAnalyserNode from "../../src/analyser/AdvancedAnalyserNode";
 import { WorkerMessagePayload } from "../../src/render-engine/worker";
 import { getDbStorageFlag } from "./audioInputScript";

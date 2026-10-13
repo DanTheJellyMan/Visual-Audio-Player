@@ -1,5 +1,5 @@
 {
-  "name": "visual-audio-player",
+  "name": "waveform-compose",
   "version": "1.0.0",
   "description": "",
   "main": "script.js",
@@ -7,23 +7,27 @@
     "test": "vitest -- --silent=false",
     "dev": "vite --config vite.examples.config.ts",
     "build": "vite build --config vite.config.ts && tsc -p tsconfig.build.json",
-    "preview": "vite preview --config vite.config.ts"
+    "preview": "vite preview --config vite.config.ts",
+    "build:examples": "vite build --config vite.examples.config.ts",
+    "deploy:examples": "npm run build:examples && gh-pages -d examples-dist"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/DanTheJellyMan/Visual-Audio-Player.git"
+    "url": "git+https://github.com/DanTheJellyMan/WaveForm-Compose.git"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "module",
   "bugs": {
-    "url": "https://github.com/DanTheJellyMan/Visual-Audio-Player/issues"
+    "url": "https://github.com/DanTheJellyMan/WaveForm-Compose/issues"
   },
-  "homepage": "https://github.com/DanTheJellyMan/Visual-Audio-Player#readme",
+  "homepage": "https://github.com/DanTheJellyMan/WaveForm-Compose#readme",
   "devDependencies": {
     "@types/audioworklet": "^0.0.98",
+    "@types/node": "^26.6.5",
     "@webgpu/types": "^0.1.70",
+    "gh-pages": "^6.1.1",
     "typescript": "^6.0.3",
     "vite": "^8.0.10",
     "vitest": "^4.1.7"

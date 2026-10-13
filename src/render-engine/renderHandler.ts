@@ -189,7 +189,7 @@ export async function render<T extends RenderFnState>(state: T): Promise<T> {
 
         // FOR TESTING (interp should be implemented on the gpu, not cpu)
         for (let i=0; i<manSampArr.length; i++) {
-            manSampArr[i] = cerp(oldSampArr[i], manSampArr[i], 0.3);
+            manSampArr[i] = cerp(oldSampArr[i], manSampArr[i], 0.45);
         }
     }
     device.queue.writeBuffer(

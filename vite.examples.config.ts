@@ -1,9 +1,23 @@
 /// <reference types="vitest/config" />
-
+import { resolve } from "path";
+import { fileURLToPath } from "url";
 import { defineConfig } from "vite";
 
+const examplesDir = fileURLToPath(new URL("./examples", import.meta.url));
+
 export default defineConfig({
-    root: "examples",
+    base: "/",
+    root: examplesDir,
+    build: {
+        outDir: "../examples-dist",
+        emptyOutDir: true,
+        rolldownOptions: {
+            input: {
+                main: resolve(examplesDir, "index.html"),
+                demo: resolve(examplesDir, "demo/index.html")
+            }
+        }
+    },
     server: {
         cors: {
             origin: false,

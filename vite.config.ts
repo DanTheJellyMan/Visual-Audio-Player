@@ -5,7 +5,7 @@ import { defineConfig } from "vite";
 export default defineConfig({
     build: {
         lib: {
-            name: "Visual-Audio-Player",
+            name: "WaveForm-Compose",
             entry: "src",
             formats: ["es"]
         }
