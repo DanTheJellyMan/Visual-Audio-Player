@@ -1,3 +1,4 @@
+import processorUrl from "./AdvancedAnalyserProcessor.ts?worker&url";
 import { Dictionary } from "../utils/types";
 import strictObjectAssign from "../utils/strictObjectAssign";
 import AudioDataManager from "./AudioDataManager";
@@ -63,9 +64,7 @@ export default class AdvancedAnalyserNode extends AudioWorkletNode {
      * @returns 
      */
     public static async create(context: AudioContext): Promise<AdvancedAnalyserNode> {
-        const processorUrl = new URL("./AdvancedAnalyserProcessor", import.meta.url);
         await context.audioWorklet.addModule(processorUrl);
-
         const analyser = new AdvancedAnalyserNode(context);
         return analyser;
     }

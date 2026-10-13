@@ -9,6 +9,9 @@ export default defineConfig({
     base: "/",
     root: examplesDir,
     publicDir: resolve(examplesDir, "../public"),
+    worker: {
+        format: "es"
+    },
     build: {
         outDir: "../examples-dist",
         emptyOutDir: true,

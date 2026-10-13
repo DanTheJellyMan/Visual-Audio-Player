@@ -1,3 +1,4 @@
+// import MyWorker from "../../src/render-engine/worker.ts?worker";
 import AdvancedAnalyserNode from "../../src/analyser/AdvancedAnalyserNode";
 import { WorkerMessagePayload } from "../../src/render-engine/worker";
 import { getDbStorageFlag } from "./audioInputScript";
@@ -25,7 +26,13 @@ sourceNode
 .connect(audioContext.destination);
 
 const workerUrl = new URL("../../src/render-engine/worker.ts", import.meta.url);
-const worker = new Worker(workerUrl, { type: "module" });
+console.log(`url variable: ${workerUrl}`);
+// const worker = new MyWorker();
+const worker = new Worker(
+    // workerUrl,
+    new URL("../../src/render-engine/worker.ts", import.meta.url),
+    { type: "module", credentials: "omit" }
+);
 (globalThis as any)[RENDER_WORKER_NAME] = worker;
 worker.addEventListener("message", (e) => {
     if (e.data !== "Ready") throw new Error(e.data);
