@@ -8,6 +8,7 @@ const examplesDir = fileURLToPath(new URL("./examples", import.meta.url));
 export default defineConfig({
     base: "/",
     root: examplesDir,
+    publicDir: resolve(examplesDir, "../public"),
     build: {
         outDir: "../examples-dist",
         emptyOutDir: true,

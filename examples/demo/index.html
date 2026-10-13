@@ -6,6 +6,14 @@
     <script type="module" src="./script.ts"></script>
 </head>
 <body>
+    <script>
+        if (!window.crossOriginIsolated) {
+            const err = new Error("Site must be cross origin isolated for SharedArrayBuffer to work");
+            console.error(err);
+            alert(err.message);
+        }
+    </script>
+
     <div id="audio-options">
         <label for="db-audio-toggle" title="Allows for convenient loading of previous audio files">
             Toggle Audio File Database storage

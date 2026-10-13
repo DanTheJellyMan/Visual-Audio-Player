@@ -2,10 +2,18 @@
 <html>
 <head>
     <title>WaveForm Compose</title>
-  <script type="module" crossorigin src="/WaveForm-Compose/assets/demo-BjSez_gm.js"></script>
-  <link rel="stylesheet" crossorigin href="/WaveForm-Compose/assets/demo-Co06xJ-k.css">
+  <script type="module" crossorigin src="/assets/demo-DnEZ7Ttz.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/demo-Co06xJ-k.css">
 </head>
 <body>
+    <script>
+        if (!window.crossOriginIsolated) {
+            const err = new Error("Site must be cross origin isolated for SharedArrayBuffer to work");
+            console.error(err);
+            alert(err.message);
+        }
+    </script>
+
     <div id="audio-options">
         <label for="db-audio-toggle" title="Allows for convenient loading of previous audio files">
             Toggle Audio File Database storage

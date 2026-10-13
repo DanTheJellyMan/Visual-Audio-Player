@@ -6,7 +6,7 @@ const dbAudioToggleEl: HTMLInputElement =
 dbAudioToggleEl.checked = getDbStorageFlag();
 const audioInput: HTMLInputElement =
     document.querySelector("input#audio-file-input[type='file']")!;
-audioInput.files = new DataTransfer().files;
+// audioInput.files = new DataTransfer().files;
 
 const audio: HTMLAudioElement = document.querySelector("audio#music")!;
 

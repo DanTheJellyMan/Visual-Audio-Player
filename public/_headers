@@ -1,3 +1,3 @@
-/
-    cross-origin-opener-policy: same-origin
-    cross-origin-embedder-policy: credentialless
+/*
+    Cross-Origin-Opener-Policy: same-origin
+    Cross-Origin-Embedder-Policy: credentialless
