@@ -20,9 +20,8 @@ const audio: HTMLAudioElement = document.querySelector("#music")!;
 const audioContext = new AudioContext();
 const sourceNode = audioContext.createMediaElementSource(audio);
 const analyser = await AdvancedAnalyserNode.create(audioContext);
-sourceNode
-.connect(analyser)
-.connect(audioContext.destination);
+sourceNode.connect(analyser);
+sourceNode.connect(audioContext.destination);
 
 const worker = new Worker(
     new URL("../../src/render-engine/worker.ts", import.meta.url),
